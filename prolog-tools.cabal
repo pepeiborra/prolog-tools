@@ -12,7 +12,7 @@ author: Pepe Iborra
 
 Library
   buildable: True
-  build-depends: base, TRS
+  build-depends: base, prolog, containers, mtl, TRS
   exposed-modules:
      Language.Prolog.Signature
      Language.Prolog.TypeChecker

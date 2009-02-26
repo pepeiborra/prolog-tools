@@ -1,0 +1,18 @@
+name: prolog-tools
+version: 0.1
+Cabal-Version:  >= 1.2
+license: AllRightsReserved
+license-file: ""
+copyright: Pepe Iborra, All Rights Reserved
+homepage:
+synopsis: Some Prolog related tools
+description: 
+category:
+author: Pepe Iborra
+
+Library
+  buildable: True
+  build-depends: base, TRS
+  exposed-modules:
+     Language.Prolog.Signature
+     Language.Prolog.TypeChecker

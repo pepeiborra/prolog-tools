@@ -13,7 +13,7 @@ import TRS.Signature
 
 deriving instance Ord VName
 
-instance SignatureC Program Ident where
+instance HasSignature Program Ident where
   getSignature cc = let aritiesP = Map.fromList [ (f, length tt) | Pred f tt   <- F.toList =<< cc]
                         aritiesF = Map.fromList [ (f, length tt) | Pred _ args <- F.toList =<< cc, Term f tt <- subterms =<< args ]
                         functors = Map.keysSet aritiesF

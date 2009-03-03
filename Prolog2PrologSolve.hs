@@ -1,0 +1,87 @@
+import Control.Applicative hiding ((<|>), many)
+import Control.Monad.Error
+import Data.List
+import Data.Maybe
+import qualified Data.Set as Set
+import Language.Prolog.Parser as Prolog (program, query, clause, whiteSpace)
+import Language.Prolog.Syntax as Prolog
+import Language.Prolog.Signature
+import Text.ParserCombinators.Parsec
+import Text.PrettyPrint (text)
+import TRS.Signature
+
+instance Error ParseError
+
+main = interact ( either error (\(pgm, goal) -> show(ppr pgm) ++
+                                               "\n%query: " ++ show (ppr goal) ++ "\n")
+                . translate)
+
+translate :: String -> Either String (Program, TermF Mode)
+translate txt = do
+  things <- mapLeft show $ parse problemP "" txt
+  let pgm      = [c | Clause c <- things]
+      qq_txt   = [q | QueryString q <- things]
+  queries1 <- mapLeft show $ mapM atomToGoal (concat [q | Query q <- things])
+  queries2 <- mapLeft show $ mapM parseGoal qq_txt
+  case queries1 ++ queries2 of
+        [Term goal_f tt] -> do
+            let sig = getSignature pgm
+                findFreeSymbol :: String -> String
+                findFreeSymbol pre = fromJust $ find (`Set.notMember` allSymbols sig) (pre : [pre ++ show i | i <- [0..]])
+                [solveF, clauseF, goalF, trueF] = map findFreeSymbol ["solve", "clause", "goal", "true"]
+                solveP arg    = Pred solveF [arg]
+                clauseP a1 a2 = Pred clauseF [a1,a2]
+                trueT         = term trueF []
+                tupleT x y    = term "" [x,y]
+                (x,y)         = (var "X", var "Y")
+                transformClause (h :- [])   = clauseP (transformPred h) trueT               :- []
+                transformClause (h :- cc)   = clauseP (transformPred h) (transformPreds cc) :- []
+                transformPred   (Pred f tt) = term f tt
+                transformPreds              = foldl1 tupleT . map transformPred
+                solveClauses = [ solveP trueT :- []
+                               , solveP (tupleT x y) :- [solveP x, solveP y]
+                               , solveP x :- [clauseP x y , solveP y]]
+                goalClause   = let myvars = take (length tt) vars
+                                   vars   = map (var.(:[])) ['A'..'Z']
+                               in [Pred goalF myvars :- [solveP (term goal_f myvars)]]
+                goal'        = Term goalF tt
+                pgm'         = map transformClause pgm ++ solveClauses ++ goalClause
+            return (pgm', goal')
+        _ -> fail "Expected one and only one query"
+  where
+        atomToGoal (Prolog.Pred f tt) = Term f <$> (parse modesP "" $ unwords $ map (show . ppr) $ tt)
+
+data Mode = G|V
+instance Show Mode where show G = "b"; show V = "f"
+instance Ppr Mode where ppr = text . show
+
+--parseGoal :: String -> Either ParseError Goal
+parseGoal = parse p "" where
+    ident = many1 (alphaNum <|> oneOf "!+_-./<>=?\\/^")
+    mode  = (oneOf "gbi" >> return G) <|> (oneOf "vof" >> return V)
+    parens= between (char '(') (char ')')
+    p = do
+      spaces
+      id <- ident
+      modes <- parens (mode `sepBy` char ',')
+      return (Term id modes)
+
+modesP = modeP `sepBy` char ','
+modeP = (oneOf "gbi" >> return G) <|> (oneOf "vof" >> return V)
+
+data PrologSection = Query [Atom] | Clause Clause | QueryString String
+
+problemP = do
+  txt <- getInput
+  let !queryComments = map QueryString $ catMaybes $ map findQuery (lines txt)
+  res <- Prolog.whiteSpace >> many (Clause <$> Prolog.clause <|> Query <$> Prolog.query)
+  return (res ++ queryComments)
+  where findQuery ('%'    :'q':'u':'e':'r':'y':':':' ':goal) = Just $ goal
+        findQuery ('%':' ':'q':'u':'e':'r':'y':':':' ':goal) = Just $ goal
+        findQuery ('%'    :'q':'u':'e':'r':'y':':':goal) = Just $ goal
+        findQuery ('%':' ':'q':'u':'e':'r':'y':':':goal) = Just $ goal
+        findQuery _ = Nothing
+
+mapLeft :: (l -> l') -> Either l r -> Either l' r
+mapLeft f (Left x)  = Left(f x)
+mapLeft f (Right r) = Right r

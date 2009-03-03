@@ -16,3 +16,8 @@ Library
   exposed-modules:
      Language.Prolog.Signature
      Language.Prolog.TypeChecker
+
+Executable prolog2prologSolve
+  buildable: True
+  build-depends: base, prolog, pretty, parsec
+  main-is: Prolog2PrologSolve.hs

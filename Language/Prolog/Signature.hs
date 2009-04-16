@@ -1,4 +1,8 @@
-{-# LANGUAGE StandaloneDeriving, TypeSynonymInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+
+
 module Language.Prolog.Signature (module TRS.Signature) where
 
 import Control.Monad

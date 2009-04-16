@@ -16,6 +16,7 @@ Library
   exposed-modules:
      Language.Prolog.Signature
      Language.Prolog.SharingAnalysis
+     Language.Prolog.ModeAnalysis
 
 Executable prolog2prologSolve
   buildable: True

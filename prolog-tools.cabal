@@ -1,5 +1,5 @@
 name: prolog-tools
-version: 0.1.20090302
+version: 0.1.20090416
 Cabal-Version:  >= 1.2
 license: AllRightsReserved
 license-file: ""
@@ -15,7 +15,7 @@ Library
   build-depends: base, prolog, containers, mtl, TRS
   exposed-modules:
      Language.Prolog.Signature
-     Language.Prolog.TypeChecker
+     Language.Prolog.SharingAnalysis
 
 Executable prolog2prologSolve
   buildable: True

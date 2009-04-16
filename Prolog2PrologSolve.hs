@@ -16,7 +16,7 @@ main = interact ( either error (\(pgm, goal) -> show(ppr pgm) ++
                                                "\n%query: " ++ show (ppr goal) ++ "\n")
                 . translate)
 
-translate :: String -> Either String (Program, TermF Mode)
+translate :: String -> Either String (Program String, TermF String Mode)
 translate txt = do
   things <- mapLeft show $ parse problemP "" txt
   let pgm      = [c | Clause c <- things]
@@ -28,7 +28,7 @@ translate txt = do
             let sig = getSignature pgm
                 findFreeSymbol :: String -> String
                 findFreeSymbol pre = fromJust $ find (`Set.notMember` allSymbols sig) (pre : [pre ++ show i | i <- [0..]])
-                [solveF, clauseF, goalF, trueF] = map findFreeSymbol ["solve", "clause", "goal", "true"]
+                [solveF, clauseF, goalF, trueF, equalsF] = map findFreeSymbol ["solve", "clause", "goal", "true", "equal"]
                 solveP arg    = Pred solveF [arg]
                 clauseP a1 a2 = Pred clauseF [a1,a2]
                 trueT         = term trueF []
@@ -37,6 +37,8 @@ translate txt = do
                 transformClause (h :- [])   = clauseP (transformPred h) trueT               :- []
                 transformClause (h :- cc)   = clauseP (transformPred h) (transformPreds cc) :- []
                 transformPred   (Pred f tt) = term f tt
+                transformPred   (Is f g)    = term equalsF [f, g]
+                transformPred   (f :=: g)   = term equalsF [f, g]
                 transformPreds              = foldl1 tupleT . map transformPred
                 solveClauses = [ solveP trueT :- []
                                , solveP (tupleT x y) :- [solveP x, solveP y]
@@ -69,7 +71,7 @@ parseGoal = parse p "" where
 modesP = modeP `sepBy` char ','
 modeP = (oneOf "gbi" >> return G) <|> (oneOf "vof" >> return V)
 
-data PrologSection = Query [Atom] | Clause Clause | QueryString String
+data PrologSection = Query [Atom String] | Clause (Clause String) | QueryString String
 
 problemP = do
   txt <- getInput

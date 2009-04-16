@@ -4,7 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving, StandaloneDeriving #-}
 
-module Language.Prolog.TypeChecker where
+module Language.Prolog.SharingAnalysis where
 
 import Control.Applicative
 import Control.Arrow
@@ -29,10 +29,10 @@ import Debug.Trace
 trace _ = id
 #endif
 
-type Type = (Ident,Int)
-type TypeAssignment = [Set Type]
+type Type id = (id,Int)
+type SharingAssignment id = [Set (Type id)]
 
-infer :: Program -> TypeAssignment
+infer :: (Ord id, Show id) => Program id -> SharingAssignment id
 infer pgm = map fromClass $ fst $ execState (mapM_ typeclause pgm) (a0,mempty) where
    sig = getSignature pgm
    a0  = [ Class(Set.singleton (f,i)) | (f,ar) <- Map.toList (arity sig)

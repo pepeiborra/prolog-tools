@@ -8,6 +8,7 @@ module Language.Prolog.SharingAnalysis where
 
 import Control.Applicative
 import Control.Arrow
+import Control.Monad.Free
 import Control.Monad.State
 import Language.Prolog.Syntax
 import qualified Data.Foldable as F
@@ -41,15 +42,15 @@ infer pgm = map fromClass $ fst $ execState (mapM_ typeclause pgm) (a0,mempty) w
    typeclause (l:-r)    = typePred l >> mapM_ typePred r >> modify (second (const mempty))
    typePred (Pred f tt) = sequence_ [typeTerm t (f,i) | (t,i) <- tt `zip` [1..]]
    typePred _ = return ()
-   typeTerm (In t) = f t where
-    f (Term f tt) typ = mergeM typ (f,0) >> sequence_ [typeTerm t (f,i) | (t,i) <- tt `zip` [1..]]
-    f (Int _)     typ = f (Var$ VName "hi1337TypeofInts") typ -- Yes I know, I'm gonna burn in hell...
-    f (Float _)   typ = f (Var$ VName "hi1337TypeofDoubles") typ
-    f (Var var)   typ = do
+   typeTerm (Pure var) typ = do
      val <- readVar var
      case val of
        Nothing   -> bindVar var typ
        Just typ' -> mergeM typ typ'
+   typeTerm (Impure t) typ = f t typ where
+    f (Term f tt) typ = mergeM typ (f,0) >> sequence_ [typeTerm t (f,i) | (t,i) <- tt `zip` [1..]]
+    f (Int _)     typ = typeTerm (return $ VName "hi1337TypeofInts") typ -- Yes I know, I'm gonna burn in hell...
+    f (Float _)   typ = typeTerm (return $ VName "hi1337TypeofDoubles") typ
     f _ _ = return ()
 
    mergeM typ1 typ2 = modify (first (merge typ1 typ2))

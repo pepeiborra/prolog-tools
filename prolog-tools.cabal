@@ -12,11 +12,12 @@ author: Pepe Iborra
 
 Library
   buildable: True
-  build-depends: base, prolog, containers, mtl, TRS
+  build-depends: base, prolog, containers, mtl, TRS, alacarte, control-monad-free >= 0.4
   exposed-modules:
      Language.Prolog.Signature
      Language.Prolog.SharingAnalysis
      Language.Prolog.ModeAnalysis
+     Language.Prolog.PreInterpretation
 
 Executable prolog2prologSolve
   buildable: True

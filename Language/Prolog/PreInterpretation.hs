@@ -40,8 +40,8 @@ import Prelude hiding (any)
 
 -- | An interpretation is just a set of atoms
 newtype Interpretation idp d = I {interpretation::Set (AtomF idp d)} deriving (Eq,Monoid)
-instance (Show idp, Ppr term) => Ppr  (Interpretation idp term) where ppr  = vcat . map ppr . Set.toList . interpretation
-instance (Show idp, Ppr term) => Show (Interpretation idp term) where show = show . ppr
+instance (Ppr idp, Ppr term) => Ppr  (Interpretation idp term) where ppr  = vcat . map ppr . Set.toList . interpretation
+instance (Ppr idp, Ppr term) => Show (Interpretation idp term) where show = show . ppr
 mkI = I . Set.fromList
 
 type ClauseAssignment idt d = forall idp var. Ord var => Clause'' idp (Term' idt var)  -> [Clause'' idp d]

@@ -21,11 +21,14 @@ import Control.Applicative
 import Control.Arrow ((***))
 import Control.Exception
 import Control.Monad (mplus, filterM, replicateM)
-import Control.Monad.Free (foldFree, foldFreeM)
+import Control.Monad.Free (Free(..),foldFree, evalFree, foldFreeM)
 import Control.Monad.Reader (MonadReader(..), runReader)
+import Control.Monad.RWS (MonadState, MonadWriter, RWS, evalRWS, tell, get,put)
 import Control.Monad.List (ListT(..), runListT)
 import Data.AlaCarte
 import Data.Foldable (foldMap, toList)
+import qualified Data.Foldable as F
+import Data.List (find, (\\), nub)
 import Data.Maybe
 import Data.Monoid (Sum(..), Monoid(..))
 import Data.Map (Map)
@@ -33,7 +36,7 @@ import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Traversable as T
-import Language.Prolog.Syntax
+import Language.Prolog.Syntax as Prolog
 import Language.Prolog.Signature
 import Text.PrettyPrint
 import Prelude hiding (any)
@@ -54,18 +57,24 @@ deriving instance (Ord id,  Ord f)    => Ord (TermF id f)
 --   according to an interpretation, giving as a parameter the function which
 --   constructs the delta mapping from the signature of the program.
 getSuccessPatterns mkDelta pl = fixEq (tp_preinterpretation pl' ta) mempty where
-  sig   = getSignature pl
+  PrologSig sigma _   = getPrologSignature pl'
   pl'   = fmap3 (foldFree return f) pl where f(Term f tt) = term (Id f) tt
-  sigma = Map.fromList ([ (Id f,i) | f <- Set.toList(constructorSymbols sig)
-                                   , let i = getArity sig f])
   ta  = mkClauseAssignment (Set.toList modes)
                            (\f tt -> fromJust $ Map.lookup (f,tt) transitions)
+  (modes,transitions) = buildPre (mkDelta sigma) sigma pre0
 
-  (modes,transitions) = buildPre (mkDelta sigma) sigma
+getSuccessPatterns' :: (Any :<: f, PprF f, f :<: T (PointedId id) :+: f, Ord idp, Ord id, Ppr id, Ord (Expr f)) =>
+                        (Arity (PointedId id) -> DeltaMany (PointedId id) (Expr f)) -> Program'' idp (Term id) ->
+                       (PreInterpretation (PointedId id) f, Program'' (AbstractPred idp) (Term (Object (T (PointedId id) :+: f))))
+getSuccessPatterns' mkDelta pl = (pre, tp_abstractcompile pre pl') where
+  PrologSig sigma _ = getPrologSignature pl'
+  pl'   = fmap3 (foldFree return f) pl where f(Term f tt) = term (Id f) tt
+  pre@(dom,_) = buildPre (mkDelta sigma) sigma pre0
 
 -- ------------------
 -- Fixpoint operator
 -- ------------------
+
 -- | The l.f.p. computation of a program according to a Clause Assignment.
 tp_preinterpretation :: (Ord idp, Ord d, Ord var) => Program'' idp (Term' idt var) -> ClauseAssignment idt d -> Interpretation idp d -> Interpretation idp d
 tp_preinterpretation p j (I i) = mkI
@@ -86,13 +95,90 @@ mkClauseAssignment domain pre c@(h :- cc) = [runReader (mapM2 (foldFreeM var_map
    fv          = foldMap2 toList (h:cc)
 
 
+-- ----------------------
+-- Abstract Compilation
+-- ----------------------
+-- | The framework introduces a distinguished object V in the abstract language
+--   to model variables (no term evaluates to V).
+data PointedId id = V | Id {fromId::id} deriving (Eq, Ord)
+
+-- | A Preinterpretation is composed of a Domain and a Delta mapping ids to domain objects
+type PreInterpretation id f = (Domain f, Delta id (Set (Expr f)))
+
+-- | The domain of a disjoint preinterpretation is composed by sets of objects.
+--   Domain objects are modeled with open datatypes.
+type Domain f = Set (Object f)
+type Object f = Set (Expr f)
+
+-- | A Delta is the mapping from n-ary syntactical function symbols to domain functions
+type    Delta     id da = Map (id, [da])  da
+newtype DeltaMany id da = DeltaMany {deltaMany::Map (id, [da]) [da]} deriving Show
+instance (Ord id, Ord da) => Monoid (DeltaMany id da) where
+  mempty = DeltaMany mempty
+  DeltaMany m1 `mappend` DeltaMany m2 = DeltaMany $ Map.unionWith (++) m1 m2
+
+data T idt a = T idt deriving (Show, Eq)
+instance Ppr id => PprF (T id) where pprF (T id) = ppr id
+instance Functor (T id) where fmap f (T id) = T id
+mkT :: (T id :<: f) => id -> Expr f
+mkT id = inject (T id)
+
+data AbstractPred id = Base id | Denotes | Domain deriving (Eq, Show)
+instance Ppr id => Ppr (AbstractPred id) where ppr (Base id) = ppr id; ppr Denotes = text "denotes"; ppr Domain = text "domain"
+
+tp_abstractcompile :: (f :<: T idt :+: f, term ~ Term idt) =>
+                      PreInterpretation idt f -> Program'' idp term -> Program'' (AbstractPred idp) (Term (Object (T idt :+: f)))
+tp_abstractcompile (domain, transitions) cc = (domainrules ++ deltaRules ++ cc') where
+  domainrules         = [Pred Domain [domain2Term d] :- [] | d <- toList domain]
+  domain2Term d       = term (Set.mapMonotonic reinject d) []
+  id2domain           = Set.singleton . mkT
+  deltaRules          = [Pred Denotes [term (id2domain id) (domain2Term <$> args), domain2Term res] :- []
+                         | ((id, args), res) <- Map.toList transitions]
+  cc'                 = map ( flattenC (\t v -> Pred Denotes [t,v])
+                            . fmap2 legacyTerm
+                            . varsDomain
+                            . fmap  legacyPred
+                            ) cc
+  varsDomain c@(h:-b) = let fv = Set.toList(Set.fromList(foldMap vars h) `Set.difference` Set.fromList (foldMap2 vars b))
+                          in h :- (b ++ map (\v -> Pred Domain [return v]) fv)
+
+  legacyPred (Pred p tt) = Pred (Base p) tt
+  legacyPred (Is t1 t2)  = Is t1 t2
+  legacyPred (t1 :=: t2) = t1 :=: t2
+  legacyPred Cut         = Cut
+
+  legacyTerm          = foldFree return f where
+    f (Term id tt) = term (id2domain id) tt
+    f (Int i)      = Prolog.int i
+    f (Float f)    = Prolog.float f
+    f Wildcard     = wildcard
+    f (String s)   = string s
+    f (Tuple t)    = tuple t
+
+flattenC :: term ~ Term idt => (term -> term -> AtomF id term) -> Clause'' id term -> Clause'' id term
+flattenC box clause@(h :- b) = h' :- (b' ++ atoms)
+  where (h' :- b', atoms) = evalRWS (T.mapM (flatten box) clause) () newvars
+        newvars = [0..] \\ nub [ i | Auto i <- foldMap2 vars clause]
+
+flatten :: (MonadState [Int] m, MonadWriter [AtomF id term] m, term ~ Term idt) => (term -> term -> AtomF id term) -> AtomF id term -> m (AtomF id term)
+flatten box = T.mapM (evalFree (return . return) f) where
+  f t = do
+    (x:xs) <- get
+    put xs
+    tell [box (Impure t) (var' x)]
+    return (var' x)
+
 -- ------------------------------------------------------
 -- DFTA algorithm to compute a disjoint preinterpretation
 -- ------------------------------------------------------
---buildPre :: (da ~ Pointed a, Show a, Show id, Enum da, Bounded da, Ord id, Ord da) => DeltaMany id da -> Map id Int -> (Set (Set da), Delta id (Set da))
+pre0 = (Set.singleton (Set.singleton any), Map.singleton (V,[])
+                                                         (Set.singleton any))
 
--- | Builds a preinterpretation from a Delta function and a signature
-buildPre (DeltaMany delta) sigma = fixEq f (Set.singleton (Set.singleton any), Map.singleton (V,[]) (Set.singleton any)) where
+-- | Completes a preinterpretation from a Delta function and a signature
+buildPre :: (da ~ Expr f, Any :<: f, PprF f, Ppr id, Ord id, Ord da) =>
+            DeltaMany id da -> Arity id -> PreInterpretation id f -> PreInterpretation id f
+buildPre (DeltaMany delta) sigma = fixEq f
+ where
  f (qd, delta_d)
    | tracePpr (text "buildPre " <> parens (ppr qd <> comma <+> ppr delta_d)) False = undefined
    | otherwise      = (mconcat *** mconcat) (unzip new_elems)
@@ -105,24 +191,6 @@ buildPre (DeltaMany delta) sigma = fixEq f (Set.singleton (Set.singleton any), M
                             [Map.lookup (f, c) delta | c <- Prelude.sequence (map Set.toList cc)]
                   , not (Set.null s)
                 ]
--- | The framework introduces a distinguished object V in the abstract language
---   to model variables (no term evaluates to V).
-data PointedId id = V | Id id deriving (Eq, Ord)
-
--- | A Preinterpretation is composed of a Domain and a Delta mapping ids to domain objects
-type PreInterpretation id f = (Domain f, Delta (PointedId id) (Set (Expr f)))
-
--- | The domain of a disjoint preinterpretation is composed by sets of objects.
---   Domain objects are modeled with open datatypes.
-type Domain f = Set (Set (Expr f))
-type Arity id = Map id Int
-
--- | A Delta is the mapping from n-ary syntactical function symbols to domain functions
-type    Delta     id da = Map (id, [da])  da
-newtype DeltaMany id da = DeltaMany {deltaMany::Map (id, [da]) [da]} deriving Show
-instance (Ord id, Ord da) => Monoid (DeltaMany id da) where
-  mempty = DeltaMany mempty
-  DeltaMany m1 `mappend` DeltaMany m2 = DeltaMany $ Map.unionWith (++) m1 m2
 
 mkDeltaMany = DeltaMany . Map.fromListWith (++)
 toDeltaMany :: (Ord id, Ord a) => Delta id a -> DeltaMany id a
@@ -134,6 +202,8 @@ mkDeltaAny sig = Map.fromList [ ((f, replicate i any), any)| (f,i) <- Map.toList
 -- --------------------------------------
 -- Preinterpretations suitable for modes
 -- --------------------------------------
+type Arity id = Map id Int
+
 -- | A constructor Static to denote ground things
 data Static f = Static deriving (Eq, Ord, Show, Bounded)
 
@@ -182,8 +252,10 @@ fmap2 = fmap.fmap
 fmap3 = fmap.fmap.fmap
 foldMap3 = foldMap.foldMap.foldMap
 foldMap2 = foldMap.foldMap
-
+foldMapM f = fmap(F.foldr mappend mempty) . T.mapM f
+foldMapM2 = foldMapM . foldMapM
 fixEq f x | fx <- f x = if fx == x then x else fixEq f fx
+snub = Set.toList . Set.fromList
 
 instance Functor Any           where fmap _ Any = Any
 instance Functor Static        where fmap _ Static = Static
@@ -197,7 +269,7 @@ instance (Ppr k, Ppr a) => Ppr (Map k a) where ppr = brackets . hcat . punctuate
 instance Show (PointedId String) where show = show.ppr
 instance PprF f => Ppr (Expr f) where ppr = foldExpr pprF
 instance PprF f =>Show (Expr f) where show = show . ppr
-instance Ppr (PointedId String) where ppr (Id i) = text i; ppr V = text "v"
+instance Ppr i => Ppr (PointedId i) where ppr (Id i) = ppr i; ppr V = text "v"
 instance Ppr Doc                where ppr = id
 
 

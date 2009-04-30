@@ -24,7 +24,7 @@ instance (Show id, Ord id) => HasSignature (Program' id var) id where
                         preds    = Map.keysSet aritiesP
                         in Sig {constructorSymbols = functors, definedSymbols = preds, arity = aritiesP `mappend` aritiesF}
 
-data PrologSignature idt idp = PrologSig {constructorSymbols :: Map idt Int, predicateSymbols :: Map idp Int }
+data PrologSignature idt idp = PrologSig {constructorSymbols :: Map idt Int, predicateSymbols :: Map idp Int } deriving (Eq,Show)
 
 getPrologSignature cc =  PrologSig aritiesF aritiesP where
     aritiesP = Map.fromList [ (f, length tt) | Pred f tt   <- F.toList =<< cc]

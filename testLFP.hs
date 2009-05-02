@@ -1,30 +1,33 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE TypeOperators, ScopedTypeVariables #-}
 
-import Language.Prolog.PreInterpretation
-import Text.ParserCombinators.Parsec (parseFromFile)
+import Control.Monad
 import Language.Prolog.Parser (program)
+import Language.Prolog.PreInterpretation
 import Language.Prolog.Semantics (eval,debug)
 import Language.Prolog.Syntax
 import System.Environment
+import Text.ParserCombinators.Parsec (parseFromFile)
 import Text.PrettyPrint
 import Data.AlaCarte
+import Data.Monoid hiding (Any)
+import qualified Data.Set as Set
 
-type Concrete = V :+: Peano :+: Tup :+: T String
-type Abstract = Any :+: Static :+: Compound :+: V :+: Peano :+: T String :+: Tup
+import Prelude hiding (pred)
+
+type Concrete = PrologTerm String
+type Abstract = Static :+: Any :+: Compound :+: PrologT :+: T String :+: V
 
 main = do
-  [mode,fp] <- getArgs
+  (fp:rest) <- getArgs
   Right pl <- parseFromFile program fp
   let mkPre :: MkPre Concrete Abstract = staticAny1
-  let ((dom,_), pl0 :: Program'' (AbstractPred String) (TermD Abstract)) = getAbstractComp mkPre pl
+  let ((dom,_), pl0 :: Program'' (AbstractPred String (Expr (PrologTerm String))) (TermD Abstract) ) = getAbstractComp mkPre pl
   putStrLn "We compute the following compiled abstraction:"
   print (ppr pl0)
   putStrLn "the Preinterpretation domain is: "
   print (ppr dom)
-  putStrLn "We obtain the success patterns:"
-  let successPats
-       | mode == "0" = show (getSuccessPatterns  mkPre pl :: Interpretation String (Object Abstract))
-       | otherwise   = show (getSuccessPatterns' mkPre pl :: Interpretation (AbstractPred String) (TermD Abstract))
-  putStrLn successPats
+  when (length rest > 0) $ do
+         putStrLn "We obtain the success patterns:"
+         print (getSuccessPatterns mkPre pl :: Interpretation String (Object Abstract))
 

@@ -7,6 +7,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE RecordWildCards #-}
 
 {- | Abstract Analyses based on Preinterpretations
      * /Abstract domains based on regular types/ John Gallagher, K Henriksen.
@@ -47,25 +48,26 @@ import Prelude hiding (any, succ, pred)
 -- -----
 type TermC idt = Term1 (Expr (PrologTerm idt)) VName   -- ^ Concrete terms
 type TermD f   = Term0 (Object f) VName                -- ^ Domain (abstract) terms
+type TermDset f   = Term0 (ObjectSet f) VName                -- ^ Domain (abstract) terms
 type PrologTerm idt = PrologT :+: T idt :+: V
 
 -- | An interpretation is just a set of atoms
 newtype Interpretation idp d = I {interpretation::Set (AtomF idp d)} deriving (Eq,Monoid)
-instance (Ppr idp, Ppr term) => Ppr  (Interpretation idp term) where ppr  = vcat . map ppr . Set.toList . interpretation
-instance (Ppr idp, Ppr term) => Show (Interpretation idp term) where show = show . ppr
-mkI = I . Set.fromList
-liftI f (I i) = I (f i)
 
 -- | A Preinterpretation is composed of a Domain and a Delta mapping ids to domain objects
-type PreInterpretation' id d = (Domain d, Delta id (Set d))
-type PreInterpretation  id f = PreInterpretation' (Expr id) (Expr f)
+type PreInterpretation'   id d  = (Domain d, Delta id d)
+type PreInterpretation    id f  = PreInterpretation' (Expr id) (Expr f)
+type PreInterpretationSet id f  = PreInterpretation' (Expr id) (Set(Expr f))
+type PreInterpretationSet' id d = PreInterpretation' id (Set d)
 type Arity id = Map id Int
+
 type MkPre ft fd = Arity (Expr ft) -> DeltaMany (Expr ft) (Expr fd)
 
 -- | The domain of a disjoint preinterpretation is composed by sets of objects.
 --   Domain objects are modeled with open datatypes.
-type Domain d = Set (Set d)
-type Object d = Set (Expr d)
+type Domain d = Set d
+type Object d = (Expr d)
+type ObjectSet d = Set(Expr d)
 
 -- | A Delta is the mapping from n-ary syntactical function symbols to domain functions
 type    Delta     id da = Map (id, [da])  da
@@ -75,6 +77,10 @@ type ClauseAssignment term d = forall idp var. Ord var => Clause'' idp (Free ter
 
 deriving instance (Ord idp, Ord term) => Ord (AtomF idp term)
 deriving instance (Ord id,  Ord f)    => Ord (TermF id f)
+instance (Ppr idp, Ppr term) => Ppr  (Interpretation idp term) where ppr  = vcat . map ppr . Set.toList . interpretation
+instance (Ppr idp, Ppr term) => Show (Interpretation idp term) where show = show . ppr
+mkI = I . Set.fromList
+liftI f (I i) = I (f i)
 
 -- ------------------
 -- External interface
@@ -84,12 +90,21 @@ deriving instance (Ord id,  Ord f)    => Ord (TermF id f)
 --   according to an interpretation, giving as a parameter the function which
 --   constructs the delta mapping from the signature of the program.
 getSuccessPatterns :: (Ord idt, Ord idp, Ord var, Ppr idt, PprF f', Ord (Expr f'), Any :<: f', ft ~ PrologTerm idt) =>
-                      MkPre ft f' -> Program'' idp (Term' idt var) -> Interpretation idp (Object f')
+                      MkPre ft f' -> Program'' idp (Term' idt var) -> Interpretation idp (ObjectSet f')
 getSuccessPatterns mkDelta pl = fixEq (tp_preinterpretation pl' ta) mempty where
   PrologSig sigma _   = getPrologSignature1 pl'
   pl' = prepareProgram pl
   ta  = mkClauseAssignment (Just . id1) (Set.toList modes) (\f tt -> fromJust $ Map.lookup (f,tt) transitions)
   (modes,transitions) = buildPre (mkDelta sigma) sigma pre0
+
+getCookedSuccessPatterns :: (Ord idp, Ord idt, Ord var, Ppr idt) => Program'' idp (Term' idt var) -> Interpretation idp (Expr (Any :+: Compound :+: Static :+: PrologTerm idt))
+getCookedSuccessPatterns  pl = fixEq (tp_preinterpretation pl' ta) mempty where
+  pl' = prepareProgram pl
+  PrologSig sigma _   = getPrologSignature1 pl'
+  ta  = mkClauseAssignment (Just . id1) (Set.toList modes) 
+                 (\f tt -> fromMaybe (error ("getCookedSuccessPatterns: " ++ show (f,tt))) $ Map.lookup (f,tt) transitions)
+  (modes,transitions) = cookPre sigma
+
 
 prepareProgram :: Program'' idp (Term' idt var) -> Program'' idp (Term1 (Expr (PrologTerm idt)) var)
 prepareProgram  = fmap3 (foldFree return f) where
@@ -100,25 +115,34 @@ prepareProgram  = fmap3 (foldFree return f) where
 
 getAbstractComp :: (PprF f, Ord idp, Ord id, Ord(Expr f), Ppr id, Any :<: f, ft :<: f, ft ~ PrologTerm id) =>
                         MkPre ft f -> Program'' idp (Term id) ->
-                       (PreInterpretation ft f, Program'' (AbstractPred idp (Expr(PrologTerm id))) (TermD f))
+                       (PreInterpretationSet ft f, Program'' (AbstractPred idp (Expr(PrologTerm id))) (TermDset f))
 
 getAbstractComp mkDelta pl = (pre, pl'') where
   PrologSig sigma _ = getPrologSignature1 pl'
   pl'            = prepareProgram pl
-  pl''           = tp_abstractcompile False pre pl'
+  pl''           = tp_abstractcompile compileSet pre pl'
   pre@(dom,tran) = buildPre (mkDelta sigma) sigma pre0
+
+getCookedAbstractComp :: (Ord idp, Ord id, Ppr id, ft ~ PrologTerm id, f ~ (Any :+: Compound :+: Static :+: ft)) =>
+                        Program'' idp (Term id) ->
+                       (PreInterpretation ft f, Program'' (AbstractPred idp (Expr(PrologTerm id))) (TermD f))
+
+getCookedAbstractComp pl = (pre, pl'') where
+  pl'            = prepareProgram pl
+  PrologSig sigma _ = getPrologSignature1 pl'
+  pl''           = tp_abstractcompile compilePlain pre pl'
+  pre@(dom,tran) = cookPre sigma
 
 getSuccessPatterns' :: (Any :<: f,  ft :<: f, PprF f, Ord idp, Ord idt, Ppr idt, Ord (Expr f), ft ~ PrologTerm idt) =>
                         MkPre ft f -> Program'' idp (Term idt) ->
-                       Interpretation (AbstractPred idp (Expr ft)) (TermD f)
+                       Interpretation (AbstractPred idp (Expr ft)) (TermDset f)
 
 getSuccessPatterns' mkDelta pl = liftI (Set.filter (not.isDenotes.pred)) (fixEq (tp_herbrand (Just . id0) T pl'') mempty)
  where
   PrologSig sigma'  _ = getPrologSignature1 pl'
   pl'   = prepareProgram pl
-  pl''  = tp_abstractcompile False pre pl'
+  pl''  = tp_abstractcompile compileSet pre pl'
   pre@(dom,tran) = buildPre (mkDelta sigma') sigma' pre0
-
 
 -- ------------------
 -- Fixpoint operator
@@ -181,45 +205,49 @@ getPrologSignature1 = getPrologSignature' (Just . id1)
 type Term1 id    = Free (Term1F id)
 data Term1F id a = Term1 {id1::id, tt1::[a]} deriving (Eq, Ord, Show)
 term1 id = Impure . Term1 id
-instance Functor  (Term1F id) where fmap f (Term1 id tt) = Term1 id (map f tt)
-instance Foldable (Term1F id) where foldMap f (Term1 id tt) = foldMap f tt
-instance Traversable (Term1F id) where traverse f (Term1 id tt) = Term1 id <$> traverse f tt
-instance (Ppr id, Ppr a) => Ppr (Term1F id a) where ppr (Term1 id tt) = ppr id <> parens (hcat $ punctuate comma $ map ppr tt)
 
 type Term0 id = Free (T id)
 term0         = Impure . T
-instance Foldable (T id) where foldMap = mempty
-instance Traversable (T id) where traverse _ (T id) = pure (T id)
 
 data AbstractPred id idt = Base id | Denotes idt | Domain deriving (Eq, Show, Ord)
 instance (Ppr id, Ppr idt) => Ppr (AbstractPred id idt) where ppr (Base id) = ppr id; ppr (Denotes id) = text "denotes_" <> ppr id; ppr Domain = text "domain"
 isDenotes Denotes{} = True; isDenotes _ = False
 
-tp_abstractcompile :: (ft :<: f,
-                       term ~ TermC idt, ft ~ PrologTerm idt) =>
-                       Bool                           -- ^ Insert domain() atoms
-                    -> PreInterpretation ft f         -- ^ Preinterpretation to use
+data AbstractCompile idt d = AbstractCompile { id2domain   :: Expr (PrologTerm idt) -> d
+                                             , domain2Term :: d -> Term0 d VName
+                                             , mkDomain    :: Bool
+                                             }
+tp_abstractcompile ::  (term ~ TermC idt, ft ~ PrologTerm idt) =>
+                       AbstractCompile idt d
+                    -> PreInterpretation' (Expr ft) d      -- ^ Preinterpretation to use
                     -> Program'' idp term             -- ^ Original Program
-                    -> Program'' (AbstractPred idp (Expr ft)) (TermD f)
+                    -> Program'' (AbstractPred idp (Expr ft)) (Term0 d VName)
 
-tp_abstractcompile mkDomain (domain, transitions) cc = domainrules ++ denoteRules ++ cc' where
-  domainrules         = if mkDomain then [Pred Domain [domain2Term d] :- [] | d <- toList domain] else []
-  domain2Term d       = term0 (Set.mapMonotonic reinject d)
-  id2domain           = Set.singleton . reinject
-  denoteRules         = [Pred (Denotes id) ((domain2Term <$> args) ++ [domain2Term res]) :- []
+tp_abstractcompile AbstractCompile{..} (domain, transitions) cc = domainrules ++ denoteRules ++ cc' where
+  domainrules   = if mkDomain then [Pred Domain [domain2Term d] :- [] | d <- toList domain] else []
+  denoteRules   = [Pred (Denotes id) ((domain2Term <$> args) ++ [domain2Term res]) :- []
                           | ((id, args), res) <- Map.toList transitions]
 
-  cc'                 = map ((if mkDomain then varsDomain else id)
-                            . fmap2 (mapFree (\(Term1 id []) -> T (id2domain id)))
-                            . flattenC (\(Impure(Term1 id tt)) v -> Pred (Denotes id) (tt++[v]))
-                            . fmap legacyPred
-                            ) cc
+  cc' = map ((if mkDomain then varsDomain else id)
+            . fmap2 (mapFree (\(Term1 id []) -> T (id2domain id)))
+            . flattenC (\(Impure(Term1 id tt)) v -> Pred (Denotes id) (tt++[v]))
+            . fmap legacyPred
+            ) cc
 
   varsDomain c@(h:-b)
     = let fv = Set.toList(Set.fromList(foldMap toList h) `Set.difference` Set.fromList (foldMap2 toList b))
       in h :- (b ++ map (\v -> Pred Domain [return v]) fv)
 
   legacyPred = mapPredId Base
+
+compileSet = AbstractCompile { mkDomain  = False
+                             , id2domain = Set.singleton . reinject
+                             , domain2Term = term0 . Set.mapMonotonic reinject
+                             }
+compilePlain = AbstractCompile { mkDomain = False
+                               , id2domain = reinject
+                               , domain2Term = term0 . reinject
+                               }
 
 flattenC :: (term ~ Free f VName, Functor f, Foldable f) => (term -> term -> AtomF id term) -> Clause'' id term -> Clause'' id term
 flattenC box clause@(h :- b) = h' :- (b' ++ atoms)
@@ -235,6 +263,13 @@ flatten box = T.mapM (evalFree (return . return) f) where
     tell [box (Impure t) (var' x)]
     return (var' x)
 
+instance Functor  (Term1F id) where fmap f (Term1 id tt) = Term1 id (map f tt)
+instance Foldable (Term1F id) where foldMap f (Term1 id tt) = foldMap f tt
+instance Traversable (Term1F id) where traverse f (Term1 id tt) = Term1 id <$> traverse f tt
+instance (Ppr id, Ppr a) => Ppr (Term1F id a) where ppr(Term1 id []) = ppr id; ppr (Term1 id tt) = ppr id <> parens (hcat $ punctuate comma $ map ppr tt)
+instance Foldable (T id) where foldMap = mempty
+instance Traversable (T id) where traverse _ (T id) = pure (T id)
+
 -- ------------------------------------------------------
 -- DFTA algorithm to compute a disjoint preinterpretation
 -- ------------------------------------------------------
@@ -243,13 +278,13 @@ flatten box = T.mapM (evalFree (return . return) f) where
 data V a = V deriving (Eq,Ord)
 mkV = inject V
 
-pre0 :: (Any :<: f, V :<: id) => PreInterpretation id f
+pre0 :: (Any :<: f, V :<: id) => PreInterpretationSet id f
 pre0 = (Set.singleton (Set.singleton any), Map.singleton (mkV,[])
                                                          (Set.singleton any))
 
 -- | Completes a preinterpretation from a Delta function and a signature
 buildPre :: (Ord id, Ord da, Ppr id, Ppr da) =>
-            DeltaMany id da -> Arity id -> PreInterpretation' id da -> PreInterpretation' id da
+            DeltaMany id da -> Arity id -> PreInterpretationSet' id da -> PreInterpretationSet' id da
 buildPre (DeltaMany delta) sigma = fixEq f
  where
  f (qd, delta_d)
@@ -264,13 +299,6 @@ buildPre (DeltaMany delta) sigma = fixEq f
                             [Map.lookup (f, c) delta | c <- Prelude.sequence (map Set.toList cc)]
                   , not (Set.null s)
                 ]
-
-mkDeltaMany = DeltaMany . Map.fromListWith (++)
-toDeltaMany :: (Ord id, Ord a) => Delta id a -> DeltaMany id a
-toDeltaMany = DeltaMany . Map.map (:[])
-
-mkDeltaAny :: (Ord id, Ord (Expr f), Any :<: f) => Map id Int -> Delta id (Expr f)
-mkDeltaAny sig = Map.fromList [ ((f, replicate i any), any)| (f,i) <- Map.toList sig]
 
 -- --------------------------------------
 -- Preinterpretations suitable for modes
@@ -309,8 +337,36 @@ staticAny1 sig = toDeltaMany (mkDeltaAny sig) `mappend`
                        , let typ = case () of
                                      _ | i == 0             -> static
                                      _ | all isStatic  args -> static
-                                     _ | all isAny args     -> any
+--                                     _ | all isAny args     -> any
                                      _ | otherwise          -> compound (reinject f) args]
+
+
+cookPre :: (Compound :<: f, Any :<: f, Static :<: f, Ord (f(Expr f)), Ord (id(Expr id)), id :<: f) =>
+                  Arity (Expr id) -> PreInterpretation id f
+cookPre sig = (Set.fromList domain, tran) where
+  domain = any : static : [ compound (reinject f) args | (f,i) <- Map.toList sig
+                                                       , i>0
+                                                       , args <- replicateM i [static, any]
+                                                       , not (all isStatic args) ]
+  tran   = deltaAny `mappend` Map.fromList delta1
+
+  deltaAny = Map.empty -- Map.fromList [ ((f, replicate i any), any)| (f,i) <- Map.toList sig, i > 0]
+  delta1 = [((f, args), typ)
+            | (f,i)  <- Map.toList sig
+            , args <- replicateM i domain
+            , let typ = case () of
+                           _ | i == 0               -> static
+                           _ | all (not.isAny) args -> static
+                           _ | otherwise            -> compound (reinject f)
+                                                                (map (\m -> if isAny m then any else static) args)
+           ]
+
+mkDeltaMany = DeltaMany . Map.fromListWith (++)
+toDeltaMany :: (Ord id, Ord a) => Delta id a -> DeltaMany id a
+toDeltaMany = DeltaMany . Map.map (:[])
+
+mkDeltaAny :: (Ord id, Ord (Expr f), Any :<: f) => Map id Int -> Delta id (Expr f)
+mkDeltaAny sig = Map.fromList [ ((f, replicate i any), any)| (f,i) <- Map.toList sig]
 
 -- -----
 -- Stuff

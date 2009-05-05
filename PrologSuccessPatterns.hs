@@ -121,7 +121,7 @@ run_bddbddb pl fp bdd_paths = do
          let cmdline = ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb)
          echo ("Calling bddbddb with command line: " ++ cmdline ++ "\n")
          exitcode <- system cmdline
---         mapM_ removeFile den_files
+         mapM_ removeFile den_files
          case exitcode of
            ExitFailure{} -> error ("bddbddb failed with an error")
            ExitSuccess -> do

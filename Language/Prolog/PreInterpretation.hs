@@ -1,4 +1,5 @@
 {-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE UndecidableInstances, FlexibleContexts, FlexibleInstances, TypeSynonymInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE StandaloneDeriving, GeneralizedNewtypeDeriving #-}
@@ -21,10 +22,13 @@ module Language.Prolog.PreInterpretation where
 import Control.Applicative
 import Control.Arrow ((***))
 import Control.Exception
-import Control.Monad (mplus, filterM, replicateM)
+import Control.Monad.Identity(Identity)
+import Control.Monad (mplus, filterM, replicateM, liftM, join)
 import Control.Monad.Free (Free(..), mapFree, foldFree, evalFree, foldFreeM)
+import Control.Monad.State (evalState, evalStateT)
+import Control.Monad.Writer (runWriter, runWriterT)
 import Control.Monad.Reader (MonadReader(..), runReader)
-import Control.Monad.RWS (MonadState, MonadWriter, RWS, evalRWS, tell, get,put)
+import Control.Monad.RWS (MonadState(..), modify, MonadWriter(..), RWS, evalRWS, lift, RWST)
 import Control.Monad.List (ListT(..), runListT)
 import Data.AlaCarte
 import Data.Foldable (foldMap, toList, Foldable)
@@ -38,11 +42,14 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Traversable as T
 import Data.Traversable (Traversable(..))
-import Language.Prolog.Syntax as Prolog
+import Language.Prolog.Semantics (MonadFresh(..))
+import Language.Prolog.Syntax hiding (Cons, Nil, cons, nil)
+import qualified Language.Prolog.Syntax as Prolog
 import Language.Prolog.Signature
 import Text.PrettyPrint
 import Unsafe.Coerce
 import Prelude hiding (any, succ, pred)
+import qualified Prelude
 
 -- Types
 -- -----
@@ -51,8 +58,8 @@ type TermD f   = Term0 (Object f) VName                -- ^ Domain (abstract) te
 type TermDset f   = Term0 (ObjectSet f) VName                -- ^ Domain (abstract) terms
 type PrologTerm idt = PrologT :+: T idt :+: V
 
--- | An interpretation is just a set of atoms
-newtype Interpretation idp d = I {interpretation::Set (AtomF idp d)} deriving (Eq,Monoid)
+-- | An interpretation is just a set of goals
+newtype Interpretation idp d = I {interpretation::Set (GoalF idp d)} deriving (Eq,Monoid)
 
 -- | A Preinterpretation is composed of a Domain and a Delta mapping ids to domain objects
 type PreInterpretation'   id d  = (Domain d, Delta id d)
@@ -75,7 +82,7 @@ newtype DeltaMany id da = DeltaMany {deltaMany::Map (id, [da]) [da]} deriving Sh
 
 type ClauseAssignment term d = forall idp var. Ord var => Clause'' idp (Free term var)  -> [Clause'' idp d]
 
-deriving instance (Ord idp, Ord term) => Ord (AtomF idp term)
+deriving instance (Ord idp, Ord term) => Ord (GoalF idp term)
 deriving instance (Ord id,  Ord f)    => Ord (TermF id f)
 instance (Ppr idp, Ppr term) => Ppr  (Interpretation idp term) where ppr  = vcat . map ppr . Set.toList . interpretation
 instance (Ppr idp, Ppr term) => Show (Interpretation idp term) where show = show . ppr
@@ -101,9 +108,23 @@ getCookedSuccessPatterns :: (Ord idp, Ord idt, Ord var, Ppr idt) => Program'' id
 getCookedSuccessPatterns  pl = fixEq (tp_preinterpretation pl' ta) mempty where
   pl' = prepareProgram pl
   PrologSig sigma _   = getPrologSignature1 pl'
-  ta  = mkClauseAssignment (Just . id1) (Set.toList modes) 
-                 (\f tt -> fromMaybe (error ("getCookedSuccessPatterns: " ++ show (f,tt))) $ Map.lookup (f,tt) transitions)
+  ta  = mkClauseAssignment (Just . id1) (Set.toList modes)
+                 (\f tt -> fromMaybe (error ("getCookedSuccessPatterns: " ++ show (f,tt))) $
+                           Map.lookup (f,tt) transitions)
   (modes,transitions) = cookPre sigma
+
+-- | In this version we avoid generating the transitions map, encoding it as a Haskell function instead.
+--   Improves time efficiency in at least 50%
+getCookedSuccessPatterns' :: (Ord idp, Ord idt, Ord var, Ppr idt) => Program'' idp (Term' idt var) -> Interpretation idp (Expr (Any :+: Compound :+: Static :+: PrologTerm idt))
+getCookedSuccessPatterns'  pl = fixEq (tp_preinterpretation pl' ta) mempty where
+  pl' = prepareProgram pl
+  PrologSig sigma _   = getPrologSignature1 pl'
+  ta  = mkClauseAssignment (Just . id1) (Set.toList modes)
+                 (\f tt -> case () of
+                             _ | [] <- tt -> static
+                             _ | all (not.isAny) tt -> static
+                             _ | otherwise -> compound (reinject f) (map (\m -> if isAny m then any else static) tt))
+  (modes,_) = cookPre sigma
 
 
 prepareProgram :: Program'' idp (Term' idt var) -> Program'' idp (Term1 (Expr (PrologTerm idt)) var)
@@ -111,37 +132,38 @@ prepareProgram  = fmap3 (foldFree return f) where
     f (Int i)      = iterate succ zero !! fromInteger i
     f (Tuple tt)   = term1 tup tt
     f (Term id tt) = term1 (mkT id) tt
+    f (Prolog.Cons h t) = term1 cons [h,t]
+    f (Prolog.Nil) = term1 nil []
 
-
-getAbstractComp :: (PprF f, Ord idp, Ord id, Ord(Expr f), Ppr id, Any :<: f, ft :<: f, ft ~ PrologTerm id) =>
+getAbstractComp :: (PprF f, Ord idp, Ord id, Ord(Expr f), Ppr id, Ppr idp, Any :<: f, ft :<: f, ft ~ PrologTerm id) =>
                         MkPre ft f -> Program'' idp (Term id) ->
                        (PreInterpretationSet ft f, Program'' (AbstractPred idp (Expr(PrologTerm id))) (TermDset f))
 
-getAbstractComp mkDelta pl = (pre, pl'') where
+getAbstractComp mkDelta pl = (pre, dencc `mappend` cc') where
   PrologSig sigma _ = getPrologSignature1 pl'
   pl'            = prepareProgram pl
-  pl''           = tp_abstractcompile compileSet pre pl'
+  (_, dencc, cc')= abstractCompilePre compileSet pre pl'
   pre@(dom,tran) = buildPre (mkDelta sigma) sigma pre0
 
-getCookedAbstractComp :: (Ord idp, Ord id, Ppr id, ft ~ PrologTerm id, f ~ (Any :+: Compound :+: Static :+: ft)) =>
+getCookedAbstractComp :: (Ord idp, Ord id, Ppr id, Ppr idp, ft ~ PrologTerm id, f ~ (Any :+: Compound :+: Static :+: ft)) =>
                         Program'' idp (Term id) ->
                        (PreInterpretation ft f, Program'' (AbstractPred idp (Expr(PrologTerm id))) (TermD f))
 
-getCookedAbstractComp pl = (pre, pl'') where
-  pl'            = prepareProgram pl
+getCookedAbstractComp pl = (pre, dencc `mappend` cc') where
+  pl'               = prepareProgram pl
   PrologSig sigma _ = getPrologSignature1 pl'
-  pl''           = tp_abstractcompile compilePlain pre pl'
-  pre@(dom,tran) = cookPre sigma
+  (_, dencc, cc')   = abstractCompilePre compilePlain pre pl'
+  pre@(dom,tran)    = cookPre sigma
 
-getSuccessPatterns' :: (Any :<: f,  ft :<: f, PprF f, Ord idp, Ord idt, Ppr idt, Ord (Expr f), ft ~ PrologTerm idt) =>
+getSuccessPatterns' :: (Any :<: f,  ft :<: f, PprF f, Ord idp, Ord idt, Ppr idt, Ppr idp, Ord (Expr f), ft ~ PrologTerm idt) =>
                         MkPre ft f -> Program'' idp (Term idt) ->
                        Interpretation (AbstractPred idp (Expr ft)) (TermDset f)
 
-getSuccessPatterns' mkDelta pl = liftI (Set.filter (not.isDenotes.pred)) (fixEq (tp_herbrand (Just . id0) T pl'') mempty)
+getSuccessPatterns' mkDelta pl = liftI (Set.filter (not.isDenotes.pred)) (fixEq (tp_herbrand (Just . id0) T (dencc `mappend` cc')) mempty)
  where
   PrologSig sigma'  _ = getPrologSignature1 pl'
   pl'   = prepareProgram pl
-  pl''  = tp_abstractcompile compileSet pre pl'
+  (_, dencc, cc') = abstractCompilePre compileSet pre pl'
   pre@(dom,tran) = buildPre (mkDelta sigma') sigma' pre0
 
 -- ------------------
@@ -195,10 +217,11 @@ mkClauseAssignment getTermId domain pre c@(h :- cc) = [runReader (mapM2 (foldFre
 -- ----------------------
 -- Abstract Compilation
 -- ----------------------
-data PrologT a = Zero | Succ | Tup deriving (Show, Eq, Ord)
+data PrologT a = Zero | Succ | Tup | Cons | Nil deriving (Show, Eq, Ord)
 data T id a = T {id0::id} deriving (Show, Eq, Ord)
 tup = inject Tup
 mkT = inject . T
+cons = inject Cons; nil = inject Nil
 succ x = term1 (inject Succ) [x] ; zero = term1 (inject Zero) []
 getPrologSignature1 = getPrologSignature' (Just . id1)
 
@@ -217,19 +240,20 @@ data AbstractCompile idt d = AbstractCompile { id2domain   :: Expr (PrologTerm i
                                              , domain2Term :: d -> Term0 d VName
                                              , mkDomain    :: Bool
                                              }
-tp_abstractcompile ::  (term ~ TermC idt, ft ~ PrologTerm idt) =>
+abstractCompilePre ::  (term ~ TermC idt, ft ~ PrologTerm idt, Ppr idt, Ppr idp,
+                        pgm ~ Program'' (AbstractPred idp (Expr ft)) (Term0 d VName)) =>
                        AbstractCompile idt d
-                    -> PreInterpretation' (Expr ft) d      -- ^ Preinterpretation to use
+                    -> PreInterpretation' (Expr ft) d -- ^ Preinterpretation to use
                     -> Program'' idp term             -- ^ Original Program
-                    -> Program'' (AbstractPred idp (Expr ft)) (Term0 d VName)
+                    -> (pgm,pgm,pgm)                  -- ^ (domain, denotes, program)
 
-tp_abstractcompile AbstractCompile{..} (domain, transitions) cc = domainrules ++ denoteRules ++ cc' where
-  domainrules   = if mkDomain then [Pred Domain [domain2Term d] :- [] | d <- toList domain] else []
+abstractCompilePre AbstractCompile{..} (domain, transitions) cc = (domainrules, denoteRules, flattenDupVarsC <$> cc') where
+  domainrules   = [Pred Domain [domain2Term d] :- [] | d <- toList domain]
   denoteRules   = [Pred (Denotes id) ((domain2Term <$> args) ++ [domain2Term res]) :- []
                           | ((id, args), res) <- Map.toList transitions]
 
   cc' = map ((if mkDomain then varsDomain else id)
-            . fmap2 (mapFree (\(Term1 id []) -> T (id2domain id)))
+            . (\c -> fmap2 (mapFree (\t@(Term1 id tt) -> if null tt then T (id2domain id) else (error ("abstractCompilePre: " ++ show (ppr c)))) ) c)
             . flattenC (\(Impure(Term1 id tt)) v -> Pred (Denotes id) (tt++[v]))
             . fmap legacyPred
             ) cc
@@ -249,19 +273,40 @@ compilePlain = AbstractCompile { mkDomain = False
                                , domain2Term = term0 . reinject
                                }
 
-flattenC :: (term ~ Free f VName, Functor f, Foldable f) => (term -> term -> AtomF id term) -> Clause'' id term -> Clause'' id term
-flattenC box clause@(h :- b) = h' :- (b' ++ atoms)
-  where (h' :- b', atoms) = evalRWS (T.mapM (flatten box) clause) () newvars
-        newvars = [0..] \\ nub [ i | Auto i <- foldMap2 toList clause]
-
-flatten :: (MonadState [Int] m, MonadWriter [AtomF id term] m, term ~ Free f VName, Functor f) =>
-           (term -> term -> AtomF id term) -> AtomF id term -> m (AtomF id term)
-flatten box = T.mapM (evalFree (return . return) f) where
+-- If we try to define SomeTerm f as a local type synonim instead (using type equality coercions),
+-- GHC 6.10.2 panics down.
+type SomeTerm f = Free f VName
+flattenC :: (Traversable f, Traversable t) =>
+              (SomeTerm f -> SomeTerm f -> t (SomeTerm f)) -> ClauseF (t (SomeTerm f)) -> ClauseF (t (SomeTerm f))
+flattenC box clause@(h :- b) = h' :- (b' ++ goals)
+  where
+  (h' :- b', goals) = evalRWS (mapM2 flattenTerm clause) () newvars
+  newvars = [0..] \\ nub [ i | Auto i <- foldMap2 toList clause]
+  flattenTerm  = evalFree (return . return) f
   f t = do
     (x:xs) <- get
     put xs
-    tell [box (Impure t) (var' x)]
+    t' <- T.mapM flattenTerm t
+    tell [box (Impure t') (var' x)]
     return (var' x)
+
+flattenDupVarsC :: (Traversable t, Monad t) => Clause'' id (t VName) -> Clause'' id (t VName)
+flattenDupVarsC c = h' :- (b' ++ goals)
+ where
+   (h' :- b', goals) = evalRWS (T.mapM ((`evalStateT` mempty) . flattenDupVarsGoal) c) () newvars
+   newvars = Sum (1 + maximum (0:[ i | Auto i <- foldMap2 toList c]))
+   flattenDupVarsGoal = T.mapM(liftM join . T.mapM f)
+
+   f v = do
+    env <- get
+    case v `Set.member` env of
+      False -> modify (Set.insert v) >> return (return v)
+      True  -> do
+          v' <- lift freshVar
+          modify (Set.insert v')
+          let res = return v'
+          tell [return v :=: res]
+          return res
 
 instance Functor  (Term1F id) where fmap f (Term1 id tt) = Term1 id (map f tt)
 instance Foldable (Term1F id) where foldMap f (Term1 id tt) = foldMap f tt
@@ -399,6 +444,7 @@ instance Functor (T id)   where fmap f (T id) = T id
 instance Functor PrologT where
     fmap _ Zero = Zero; fmap _ Succ = Succ
     fmap _ Tup = Tup
+    fmap _ Cons = Cons; fmap _ Nil = Nil
 
 instance Ppr a => Ppr (Set a)            where ppr = braces   . hcat . punctuate comma . map ppr . Set.toList
 instance (Ppr k, Ppr a) => Ppr (Map k a) where ppr = brackets . hcat . punctuate comma . map ppr . Map.toList
@@ -423,9 +469,28 @@ instance Ppr id => Ppr (T id a) where ppr (T id) = ppr id
 instance PprF PrologT where
     pprF Tup = Text.PrettyPrint.empty
     pprF Zero = text "0"; pprF Succ = char 's'
+    pprF Cons = text "cons"; pprF Nil = text "nil"
 instance PprF Compound where pprF (Compound id dd) = ppr id <> parens (hcat $ punctuate comma $ map ppr dd)
 instance (PprF f, PprF g) => PprF (f :+: g) where
   pprF (Inl l) = pprF l; pprF (Inr r) = pprF r
+
+-- -------------------
+-- Output for bddbddb
+-- -------------------
+newtype BddBddb a = BddBddb a
+
+instance (Compound :<: f, Static :<: f, T String :<: f, Any :<: f, PprF f) => Ppr (BddBddb (TermD f)) where
+    ppr (BddBddb t) = ppr $ mapFree (\(T id) -> T (BddBddb id)) t
+
+instance (Compound :<: f, Static :<: f, Any :<: f, PprF f) => Ppr (BddBddb (Expr f)) where
+    ppr (BddBddb e) = foldExpr f e where
+        f (prj -> Just Static) = text "s"
+        f (prj -> Just Any)    = text "d"
+        f (prj -> Just(Compound id args)) = id <> text "_" <> hcat args
+        f x = pprF x
+
+pprBddbddb :: (Functor f, Compound :<: f, Static :<: f, T String :<: f, Any :<: f, Ppr idp, PprF f) => Program'' idp (TermD f) -> Doc
+pprBddbddb = ppr . fmap3 BddBddb
 
 -- Testing
 -- -------

@@ -23,3 +23,8 @@ Executable prolog2prologSolve
   buildable: True
   build-depends: base, prolog, pretty, parsec
   main-is: Prolog2PrologSolve.hs
+
+Executable prologSuccessPatterns
+  buildable: True
+  build-depends: base, prolog, pretty, filepath, process, directory, array
+  main-is: PrologSuccessPatterns.hs

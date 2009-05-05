@@ -19,7 +19,8 @@ import Data.Set (Set)
 import qualified Data.Map as Map
 import Data.Map (Map)
 
-import Language.Prolog.Signature
+import Language.Prolog.Signature ()
+import TRS.Signature
 
 import qualified Prelude as P
 import Prelude hiding (concatMap,mapM_)

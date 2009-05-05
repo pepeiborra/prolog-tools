@@ -21,7 +21,7 @@ translate txt = do
   things <- mapLeft show $ parse problemP "" txt
   let pgm      = [c | Clause c <- things]
       qq_txt   = [q | QueryString q <- things]
-  queries1 <- mapLeft show $ mapM atomToGoal (concat [q | Query q <- things])
+  queries1 <- mapLeft show $ mapM goalToGoal (concat [q | Query q <- things])
   queries2 <- mapLeft show $ mapM parseGoal qq_txt
   case queries1 ++ queries2 of
         [Term goal_f tt] -> do
@@ -39,7 +39,7 @@ translate txt = do
                 transformPred   (Pred f tt) = term f tt
                 transformPred   (Is f g)    = term equalsF [f, g]
                 transformPred   (f :=: g)   = term equalsF [f, g]
-                transformPreds              = foldl1 tupleT . map transformPred
+                transformPreds              = foldl1 tupleT . map transformPred . filter (not.isCut)
                 solveClauses = [ solveP trueT :- []
                                , solveP (tupleT x y) :- [solveP x, solveP y]
                                , solveP x :- [clauseP x y , solveP y]]
@@ -51,7 +51,9 @@ translate txt = do
             return (pgm', goal')
         _ -> fail "Expected one and only one query"
   where
-        atomToGoal (Prolog.Pred f tt) = Term f <$> (parse modesP "" $ unwords $ map (show . ppr) $ tt)
+        goalToGoal (Prolog.Pred f tt) = Term f <$> (parse modesP "" $ unwords $ map (show . ppr) $ tt)
+
+isCut Cut = True; isCut _ = False
 
 data Mode = G|V
 instance Show Mode where show G = "b"; show V = "f"
@@ -71,7 +73,7 @@ parseGoal = parse p "" where
 modesP = modeP `sepBy` char ','
 modeP = (oneOf "gbi" >> return G) <|> (oneOf "vof" >> return V)
 
-data PrologSection = Query [Atom String] | Clause (Clause String) | QueryString String
+data PrologSection = Query [Goal String] | Clause (Clause String) | QueryString String
 
 problemP = do
   txt <- getInput

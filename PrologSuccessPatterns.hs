@@ -44,37 +44,14 @@ main = do
   Right pl <- parseFromFile program fp
   let mkPre :: MkPre Concrete Abstract = notvarAny1
   case rest of
-    []                              -> run_bddbddb pl fp bddbddb_jar_paths
-    ["bddbddb"]                     -> run_bddbddb pl fp bddbddb_jar_paths
-    ("bddbddb" : bddbddb_jar_paths) -> run_bddbddb pl fp bddbddb_jar_paths
-    ["dfta"] -> do
-         let ((dom,_), pl0 :: AbstractDatalogProgram' String String Abstract) = getAbstractComp mkPre pl
-         echo "We compute the following compiled abstraction:"
-         print (ppr pl0)
---         echo "the Preinterpretation domain is: "
---         print (ppr dom)
-    ["cooked"] -> do
-         let pl' = prepareProgram pl
-         echo "We compute the following (cooked) compiled abstraction:"
-         let (pre@(dom',_), pl') = getCookedAbstractComp pl
-         print (ppr pl')
---         echo "the Preinterpretation domain is: "
---         print (ppr dom')
-    ["success"] -> do
-         echo "We obtain the success patterns:"
-         print (getSuccessPatterns mkPre pl :: Interpretation String (ObjectSet Abstract))
-    ["success","cooked"] -> do
-         echo "We obtain the (cooked) success patterns:"
-         print (getCookedSuccessPatterns' pl)
-    ["success","cookedslowly"] -> do
-         echo "We obtain the (slowly cooked) success patterns:"
-         print (getCookedSuccessPatterns pl)
+    []                -> run_bddbddb pl fp bddbddb_jar_paths
+    bddbddb_jar_paths -> run_bddbddb pl fp bddbddb_jar_paths
 
 run_bddbddb pl fp bdd_paths = do
          bddbddb_jar <- findBddJarFile bdd_paths
          let pl' = prepareProgram pl
              PrologSig constructors predicates = getPrologSignature1 pl'
-             (dom, _, denotes, clauses) = abstractCompilePre' pl
+             (dom, _, denotes, clauses) = datalogCompile pl
 
          withTempFile "." (fp++".bddbddb") $ \fpbddbddb hbddbddb -> do
 

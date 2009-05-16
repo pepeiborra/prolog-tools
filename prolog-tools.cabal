@@ -18,6 +18,9 @@ Library
      Language.Prolog.SharingAnalysis
      Language.Prolog.ModeAnalysis
      Language.Prolog.PreInterpretation
+     Language.Prolog.Transformations
+  other-modules:
+     Language.Prolog.Utils
 
 Executable prolog2prologSolve
   buildable: True

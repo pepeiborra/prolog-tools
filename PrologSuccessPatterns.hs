@@ -28,6 +28,8 @@ import Language.Prolog.PreInterpretation
 import Language.Prolog.Semantics (eval,debug, equiv, unifies, matches, MonadFresh(..))
 import Language.Prolog.Signature
 import Language.Prolog.Syntax
+import Language.Prolog.Transformations
+import Language.Prolog.Utils
 import System.Directory
 import System.Environment
 import System.Exit
@@ -172,7 +174,7 @@ run_bddbddb mb_goal_ pl fp bdd_paths = do
             echo "bddbddb produced the following success patterns:\n"
             print (vcat $ map ppr $ concat results)
             echo " \nWe can simplify the patterns as follows:\n"
-            let zipped_results = abstract dom <$> results
+            let zipped_results = abstract (term0 <$> dom) <$> results
             print (vcat $ map ppr $ concat zipped_results)
 
     where wildOrInt v "*" = Left v

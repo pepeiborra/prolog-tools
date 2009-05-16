@@ -4,7 +4,7 @@
 {-# LANGUAGE UndecidableInstances, FlexibleContexts, FlexibleInstances, TypeSynonymInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE StandaloneDeriving, GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE PatternGuards, ViewPatterns #-}
+{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -33,6 +33,7 @@ import Control.Monad.Reader (MonadReader(..), runReader)
 import Control.Monad.RWS (MonadState(..), modify, MonadWriter(..), RWS, evalRWS, evalRWST, lift, RWST)
 import Control.Monad.List (ListT(..), runListT)
 import Data.AlaCarte
+import Data.AlaCarte.Ppr
 import Data.Foldable (foldMap, toList, Foldable)
 import qualified Data.Foldable as F
 import Data.List (find, (\\), nub, nubBy, sort, sortBy, groupBy, elemIndex, foldl')
@@ -46,6 +47,8 @@ import qualified Data.Traversable as T
 import Data.Traversable (Traversable(..))
 import Language.Prolog.Semantics (MonadFresh(..), matches, equiv)
 import Language.Prolog.Syntax hiding (Cons, Nil, Wildcard, String, cons, nil, wildcard, string)
+import Language.Prolog.Transformations
+import Language.Prolog.Utils
 import qualified Language.Prolog.Syntax as Prolog
 import Language.Prolog.Signature
 import Text.PrettyPrint as Ppr
@@ -252,9 +255,6 @@ data NotAny a = NotAny deriving (Eq, Show, Ord)
 data Domain a = Domain deriving (Eq, Show, Ord)
 denotes = inject . Denotes; domain = inject Domain; notAny = inject NotAny
 
-data WildCard = WildCard deriving (Eq, Ord)
-wildCard = return (Left WildCard)
-
 vars' t = [ v | v@Right{} <- toList t]
 
 
@@ -350,44 +350,6 @@ compilePlain = AbstractCompile { mkDomain = False
                                , domain2Term = term0 . reinject
                                }
 
-flattenC :: (Traversable f, Traversable t, MonadFresh v m) =>
-              (Free f v -> v -> t (Free f v)) -> ClauseF (t (Free f v)) -> m(ClauseF (t (Free f v)))
-flattenC box clause@(h :- b) = do
-    (h' :- b', goals) <- runWriterT (mapM2 flattenTerm clause)
-    return (h' :- (b' ++ goals))
-  where
-  flattenTerm  = evalFree return2 f
-  f t = do
-    v <- freshVar
-    t' <- T.mapM flattenTerm t
-    tell [box (Impure t') v]
-    return2 v
-
-flattenDupVarsC :: (Traversable t, Monad t, Ord var, MonadFresh var m) => (var -> Bool) -> Clause'' id (t var) -> m(Clause'' id (t var))
-flattenDupVarsC isOk c = do
-  (h' :- b', goals) <- runWriterT (T.mapM ((`evalStateT` mempty) . flattenDupVarsGoal) c)
-  return (h' :- (b' ++ goals))
- where
-   flattenDupVarsGoal = T.mapM(liftM join . T.mapM f)
-   f v | isOk v = return2 v
-   f v = do
-    env <- get
-    case v `Set.member` env of
-      False -> modify (Set.insert v) >> return2 v
-      True  -> do
-          v' <- lift freshVar
-          modify (Set.insert v')
-          let res = return v'
-          tell [return v :=: res]
-          return res
-
-introduceWildcards :: (Ord var, Foldable f, Functor f, t ~ Free f (Either WildCard var)) =>
-                      Clause'' id t -> Clause'' id t
-introduceWildcards c = fmap2 (>>=f) c where
-    occurrences = Map.fromListWith (+) (foldMap2 vars c `zip` repeat 1)
-    f v@Right{} | Just 1 <- Map.lookup v occurrences = wildCard
-    f v = return v
-
 
 prepareProgram :: Program'' idp (Term' idt var) -> Program'' idp (TermC' idt var)
 prepareProgram  = fmap3 prepareTerm
@@ -399,42 +361,6 @@ prepareTerm = foldFree (return . Right) f where
     f Prolog.Wildcard = wildCard
     f (Prolog.Cons h t) = term1 cons [h,t]
     f (Prolog.Nil) = term1 nil []
-
-data QueryAnswer idp a = QueryAll idp | Query idp Int Int | Answer idp deriving (Eq,Ord,Show)
-answer = inject . Answer; queryAll = inject . QueryAll ; query id i j = inject (Query id i j)
-instance Functor (QueryAnswer id) where
-    fmap _ (Answer id)    = Answer id
-    fmap _ (QueryAll id)  = QueryAll id
-    fmap _ (Query id i j) = Query id i j
-instance Ppr id => PprF (QueryAnswer id) where
-    pprF (Answer   id)  = text "answer_" <> ppr id
-    pprF (QueryAll id)  = text "query_" <> ppr id
-    pprF (Query id i j) = text "query_" <> Ppr.int i <> text "_" <> Ppr.int j <> text "_" <> ppr id
-
-queryAnswer :: (Monad mt, QueryAnswer idp :<: idp', term ~ mt (Either b VName)) =>
-                   Program'' idp term -> Program'' (Expr idp') term
-queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
- where
-  answerF (Pred h h_args :- cc) =
-      Pred (answer h) h_args :- ( Pred (queryAll h) h_args :
-                                [ Pred (answer c) c_args | Pred c c_args <- cc ])
-  queryF _ (_ :- []) = []
-  queryF i (Pred h h_args :- cc@(Pred b0 b0_args :_)) =
-      Pred (query b0 i 1) b0_args :- [Pred (queryAll h) h_args] :
-      queryAllquery b0 (length b0_args) i 1 :
-     concat
-     [[Pred (query bj i j) bj_args :- ([Pred (answer c) c_args | Pred c c_args <- bleft] ++
-                                       [Pred (queryAll h) h_args])
-      ,queryAllquery bj (length bj_args) i j]
-     | (j,(bleft, Pred bj bj_args :_)) <- zip [2..] (map (`splitAt` drop i cc)  [1..length cc - 1])]
-
-queryAllquery h ar i j = let vars = take ar allvars in Pred (queryAll h) vars :- [Pred (query h i j) vars]
-  where allvars = map (return . Right . Auto) [1..]
-
-queryAnswerGoal :: (Monad mt, QueryAnswer idp :<: idp', term ~ mt (Either b VName)) =>
-                   GoalF idp term -> Program'' (Expr idp') term
-
-queryAnswerGoal  (Pred g g_args)  = [Pred (query g 0 1) g_args :- [], queryAllquery g (length g_args) 0 1]
 
 
 -- ------------------------------------------------------
@@ -545,92 +471,13 @@ mkDeltaAny sig = Map.fromList [ ((f, replicate i any), any)| (f,i) <- Map.toList
 
 anyOrElseNotVar m = if isAny m then any else notvar
 
-
--- | Abstract a set of clauses over a finite domain
-{-
-  The algorithm is a fixpoint over the following function.
-  First we identify a set of candidate arguments to abstract,
-  then generate the set of possible patterns that abstract these arguments,
-  and filter out the ones which are not entirely covered by the input clauses.
-  Finally we keep the resulting patterns and throw away the covered clauses.
--}
-abstract dom = fixEq abstractF where
-  ldom  = length dom
-  abstractF cc@(Pred f tt : _) = compress (snub (concatMap go (tail $ combinations estimations)))  cc
-   where
-    ccset = Set.fromList cc
-    zipTT = map snub $ zipAll (map args cc)
-    estimations = [ i | (i,xx) <- zip [0..] zipTT, length xx >= ldom ]
-    arity = length tt
-    go ii = [ p | p <- patterns, all (`Set.member` ccset) (explodeAt ii p) ] where
-     patterns =
-        Pred f <$> ( filter ((>0) . length . filter isVar) . nubBy equiv . Prelude.sequence)
-                    [ maybe (zipTT !! i) (const [var' 0, var' 1]) (elemIndex i ii)
-                    | i <- [0..arity-1]
-                    ]
-  explodeAt ii pat@(Pred f tt)
-   | vv <- [v | Pure v <- select ii tt]
-   = snub (Pred f <$> [ map (>>= apply vals) tt
-                        | vals <- (Map.fromList . zip vv) <$> replicateM (length vv) (term0 <$> dom)])
-  apply subst v = case Map.lookup v subst of
-                    Just t  -> t
-                    Nothing -> return v
-
-  compress patterns = let p' = zipIt patterns in (p' ++) . filter (\c -> not (Prelude.any (`matches` c) p'))
-  zipIt = foldl' f [] . groupBy ((==) `on` (length . getVars)) . sortBy (compare `on` (length . getVars))
-   where
-     f acc xx = acc ++ filter (not.consequence) (snub xx) where
-         consequence c = Prelude.any (`matches` c) acc
-
 -- -----
 -- Stuff
 -- -----
 deriving instance Ord (f(Expr f)) => Ord (Expr f)
 deriving instance (Ppr id, Ppr [da]) => Ppr (DeltaMany id da)
 
-dec2bin :: Int -> [Bool]
-dec2bin i | i < 0 = error "no entiendo numeros negativos"
-dec2bin i = go [] i where
-  go acc 0 = acc
-  go acc i = go ((i `mod` 2 /= 0) : acc) (i `div` 2)
-
-(t?:f) b = if b then t else f
-
-return2 = return.return
-mapM2 = T.mapM . T.mapM
-mapM3 = T.mapM . T.mapM . T.mapM
-fmap2 = fmap.fmap
-fmap3 = fmap.fmap.fmap
-(<$$>)  = fmap2
-(<$$$>) = fmap3
-(<$$$$>) = fmap.fmap.fmap.fmap
-foldMap3 = foldMap.foldMap.foldMap
-foldMap2 = foldMap.foldMap
-foldMapM f = fmap(F.foldr mappend mempty) . T.mapM f
-foldMapM2 = foldMapM . foldMapM
-fixEq f x | fx <- f x = if fx == x then x else fixEq f fx
-snub = Set.toList . Set.fromList
-isLeft Left{} = True; isLeft _ = False
-runFresh m c = m c `evalState` ([Right $ Auto i | i <-  [1..]] \\ foldMap2 vars' c)
-
-
-on cmp f x y = cmp (f x) (f y)
-(f .&. g) x  = f x && g x
-
-zipAll = getZipList . sequenceA . map ZipList
-
-combinations :: [a] -> [[a]]
-combinations [] = [[]]
-combinations (x:xs)
-    = combinations xs ++ [ x:xs' | xs' <- combinations xs ]
-
-
-select :: (Ord t, Num t, Foldable f) => [t] -> f a ->[a]
-select ii xx = go 0 (toList xx) (sort ii)
-    where go _ [] _ = []
-          go _ _ [] = []
-          go n (x:xx) (i:ii) | n == i = x : go (n+1) xx ii
-                             | otherwise = go (n+1) xx (i:ii)
+runFresh m c  = m c `evalState` ([Right $ Auto i | i <-  [1..]] \\ foldMap2 vars' c)
 
 instance (Ord id, Ord da) => Monoid (DeltaMany id da) where
   mempty = DeltaMany mempty
@@ -654,7 +501,6 @@ instance (Ppr a, Ppr b) => Ppr (Either a b) where ppr = either ppr ppr
 instance PprF f => Ppr (Expr f) where ppr = foldExpr pprF
 instance PprF f =>Show (Expr f) where show = show . ppr
 instance Ppr Doc                where ppr = id
-instance Ppr WildCard           where ppr _ = text "_"
 
 -- | Any is the constructor for the distinguished domain object
 --   any, the bottom of the domain. Every object in the concrete
@@ -662,7 +508,6 @@ instance Ppr WildCard           where ppr _ = text "_"
 data Any f = Any deriving (Eq, Ord, Show)
 any = inject Any; isAny (match -> Just Any) = True ; isAny _ = False
 
-class Functor f => PprF f where pprF :: f Doc -> Doc
 instance PprF Any         where pprF _ = text "any"
 instance PprF V           where pprF _ = text "V"
 instance PprF NotVar      where pprF _ = text "notvar"

@@ -15,8 +15,6 @@ import Data.Set (Set)
 import qualified Data.Map as Map
 import Data.Map (Map)
 
-deriving instance Ord VName
-
 data Mode = Inp | Out deriving (Eq, Show)
 type ModeAssignment id = Map id [Mode]
 

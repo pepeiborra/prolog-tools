@@ -1,6 +1,7 @@
 name: prolog-tools
-version: 0.1.20090416
+version: 0.1.2009056
 Cabal-Version:  >= 1.2
+build-type: Simple
 license: AllRightsReserved
 license-file: ""
 copyright: Pepe Iborra, All Rights Reserved

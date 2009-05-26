@@ -25,7 +25,7 @@ import qualified Data.Set as Set
 import qualified Data.Traversable as T
 import Data.Traversable (Traversable, sequenceA)
 import Language.Prolog.Syntax
-import Language.Prolog.Semantics (matches, equiv, equiv2, MonadFresh(..))
+import Language.Prolog.Semantics (matches, equiv, MonadFresh(..))
 import Language.Prolog.Utils
 import Text.PrettyPrint as Ppr
 
@@ -137,7 +137,7 @@ abstract dom = fixEq abstractF where
     arity = length tt
     go ii = [ p | p <- patterns, all (`Set.member` ccset) (explodeAt ii p) ] where
      patterns =
-        Pred f <$> ( filter ((>0) . length . filter isVar) . nubBy equiv2 . Prelude.sequence)
+        Pred f <$> ( filter ((>0) . length . filter isVar) . nubBy equiv . Prelude.sequence)
                     [ maybe (zipTT !! i) (const [var' 0, var' 1]) (elemIndex i ii)
                     | i <- [0..arity-1]
                     ]

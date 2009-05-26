@@ -25,15 +25,15 @@ import Control.Applicative
 import Control.Arrow ((***))
 import Control.Exception
 import Control.Monad.Identity(Identity)
-import Control.Monad (mplus, filterM, replicateM, liftM, join)
+import Control.Monad (mplus, filterM, replicateM, liftM, join, when, forM)
 import Control.Monad.Free (Free(..), mapFree, foldFree, evalFree, foldFreeM, isPure)
 import Control.Monad.State (StateT, evalState, evalStateT)
 import Control.Monad.Writer (WriterT, runWriter, runWriterT)
 import Control.Monad.Reader (MonadReader(..), runReader)
 import Control.Monad.RWS (MonadState(..), modify, MonadWriter(..), RWS, evalRWS, evalRWST, lift, RWST)
 import Control.Monad.List (ListT(..), runListT)
-import Data.AlaCarte
 import Data.AlaCarte.Ppr
+import Data.Array
 import Data.Foldable (foldMap, toList, Foldable)
 import qualified Data.Foldable as F
 import Data.List (find, (\\), nub, nubBy, sort, sortBy, groupBy, elemIndex, foldl')
@@ -45,14 +45,21 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Traversable as T
 import Data.Traversable (Traversable(..))
+import Text.PrettyPrint as Ppr
+
 import Language.Prolog.Semantics (MonadFresh(..), matches, equiv)
 import Language.Prolog.Syntax hiding (Cons, Nil, Wildcard, String, cons, nil, wildcard, string)
 import Language.Prolog.Transformations
 import Language.Prolog.Utils
 import qualified Language.Prolog.Syntax as Prolog
 import Language.Prolog.Signature
-import Text.PrettyPrint as Ppr
-import Unsafe.Coerce
+
+import System.Exit
+import System.FilePath
+import System.IO
+import System.Directory
+import System.Process
+
 import Prelude hiding (any, succ, pred)
 import qualified Prelude
 
@@ -174,6 +181,98 @@ getSuccessPatterns' mkDelta pl =
   PrologSig sigma'  _ = getPrologSignature1 pl'
   pre@(dom,tran)      = buildPre (mkDelta sigma') sigma' pre0
   (_, dencc, cc')     = abstractCompilePre compileSet pre pl'
+
+-- ------------
+-- Driver
+-- ------------
+computeSuccessPatterns :: forall idp t t' as.
+                          (idp ~ (T String :+: QueryAnswer String :+: Inst), as ~ Abstract String, t ~ DatalogTerm (Expr as), t' ~ (Free (T (Expr as)) VName)) =>
+                          Int -> Bool -> Maybe (GoalF String t) -> Program'' String (Term' String VName) -> FilePath -> [FilePath] -> IO ([Expr as], [[GoalF (Expr idp) t']])
+computeSuccessPatterns depth verbose mb_goal_ pl fp bdd_paths = do
+         bddbddb_jar <- findBddJarFile bdd_paths
+         let mb_goal = (fmap (introduceWildcards . runFresh (flattenDupVarsC isLeft)) . queryAnswerGoal)
+                         <$> mb_goal_ :: Maybe (AbstractDatalogProgram idp (Expr as))
+             pl' :: Program'' (Expr idp) (TermC String)
+             pl' = if isJust mb_goal then queryAnswer (prepareProgram pl)
+                                     else mapPredId mkT <$$> prepareProgram pl
+             PrologSig constructors predicates0 = getPrologSignature1 pl'
+             (dom, _, denotes, clauses) = abstractCompilePre' depth pl'
+             predicates = nub $
+                           (case getPrologSignature0 <$> mb_goal of Just (PrologSig _ pred) -> (Map.toList pred ++); _ -> id )
+                           (Map.toList predicates0)
+
+         withTempFile "." (fp++".bddbddb") $ \fpbddbddb hbddbddb -> do
+
+         -- Domain
+         withTempFile "." (fp++".map") $ \fpmap hmap -> do
+         let dump_bddbddb txt = hPutStrLn hbddbddb txt >> when verbose (putStrLn txt)
+
+         echo ("writing domain map file to " ++ fpmap)
+         dump_bddbddb "### Domains"
+         let domsize = length dom
+         dump_bddbddb ("D " ++ show domsize ++ " " ++ takeFileName fpmap)
+         hPutStrLn hmap (show (vcat $ map (ppr) dom))
+         hClose hmap
+
+         -- Relations
+         dump_bddbddb "\n### Relations\n"
+         dump_bddbddb $ unlines $ map show
+             [ text "denotes_" <> ppr c <> parens (hsep $ punctuate comma $ replicate (a+1) (text "arg : D"))
+                    | (c,a) <- Map.toList constructors]
+         dump_bddbddb $ unlines $ map show
+             [ ppr c <> parens (hsep $ punctuate comma $ replicate a (text "arg : D"))
+                        <+>  text "outputtuples"
+                    | (c,a) <- predicates]
+         dump_bddbddb "notAny (arg : D) inputtuples"
+         let domainDict = Map.fromList (dom `zip` [(0::Int)..])
+
+         withTempFile' (takeDirectory fp) "notAny.tuples" $ \notanyfp notanyh -> do
+         echo ("writing facts for notAny in file " ++ notanyfp )
+         hPutStrLn notanyh $ unlines (("# D0: " ++ show domsize) : [ show i | i <- [1..domsize - 1]])
+         hClose notanyh
+
+         -- Rules
+         dump_bddbddb "\n### Rules\n"
+         let cc        = foldFree return toId <$$$> clauses
+             den_cc    = foldFree return toId <$$$> denotes
+             mb_goal_c = foldFree return toId <$$$$> mb_goal
+             toId (T f) | Just i <- Map.lookup f domainDict = term0 i
+                        | otherwise = error ("Symbol not in domain: " ++ show (ppr f))
+         dump_bddbddb (show $ ppr den_cc)
+         dump_bddbddb (show $ ppr cc)
+         maybe (return ()) (dump_bddbddb . show . ppr) mb_goal_c
+
+         -- Running bddbddb
+         hClose hbddbddb
+         hClose hmap
+         let cmdline = ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb)
+         echo ("Calling bddbddb with command line: " ++ cmdline ++ "\n")
+         exitcode <- system cmdline
+
+         case exitcode of
+           ExitFailure{} -> error ("bddbddb failed with an error")
+           ExitSuccess   -> do
+            let domArray = listArray (0, domsize) dom
+            results <- forM predicates $ \(p,i) -> do
+                         echo ("Processing file " ++ show p ++ ".tuples")
+                         let fp_result = (takeDirectory fp </> show p <.> "tuples")
+                         output <- readFile fp_result
+                         evaluate (length output)
+                         removeFile fp_result
+                         return [ Pred p (map (either var' (term0 . (domArray!))) ii)
+                                  | ii <- map (map (uncurry wildOrInt) . zip [1..] . words) (drop 1 $ lines output)
+                                  , all (< domsize) [i | Right i <- ii]]
+            return (dom, results)
+
+    where wildOrInt v "*" = Left v
+          wildOrInt _ i   = Right (read i)
+          echo x | verbose   = hPutStrLn stderr x
+                 | otherwise = return ()
+
+          findBddJarFile [] = error "Cannot find bddbddb.jar"
+          findBddJarFile (fp:fps) = do
+            x <- doesFileExist fp
+            if x then return fp else findBddJarFile fps
 
 -- ------------------
 -- Fixpoint operator
@@ -478,6 +577,18 @@ deriving instance Ord (f(Expr f)) => Ord (Expr f)
 deriving instance (Ppr id, Ppr [da]) => Ppr (DeltaMany id da)
 
 runFresh m c  = m c `evalState` ([Right $ Auto i | i <-  [1..]] \\ foldMap2 vars' c)
+
+
+withTempFile dir name m = bracket (openTempFile dir' name') (removeFile . fst) (uncurry m)
+  where (dirname, name') = splitFileName name
+        dir'  = dir </> dirname
+
+withTempFile' dir name m = do
+    doesFileExist fp >>= \true -> when true (error ("Please delete file " ++ fp ++ " and start again"))
+    bracket (openFile fp ReadWriteMode) (\_->removeFile fp) (m fp)
+  where fp = dir' </> name'
+        (dirname, name') = splitFileName name
+        dir'  = dir </> dirname
 
 instance (Ord id, Ord da) => Monoid (DeltaMany id da) where
   mempty = DeltaMany mempty

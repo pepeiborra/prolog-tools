@@ -86,7 +86,7 @@ type PreInterpretationSet id f  = PreInterpretation' (Expr id) (Set(Expr f))
 type PreInterpretationSet' id d = PreInterpretation' id (Set d)
 type Arity id = Map id Int
 
-type MkPre ft fd = Arity (Expr ft) -> DeltaMany (Expr ft) (Expr fd)
+type MkPre ft fd = Arity (Expr ft) -> (DeltaMany (Expr ft) (Expr fd), Arity (Expr ft))
 
 -- | The domain of a disjoint preinterpretation is composed by sets of objects.
 --   Domain objects are modeled with open datatypes.
@@ -119,7 +119,7 @@ getSuccessPatterns mkDelta pl = fixEq (tp_preinterpretation pl' ta) mempty where
   PrologSig sigma _   = getPrologSignature1 pl'
   pl' = prepareProgram pl
   ta  = mkClauseAssignment (Just . id1) (Set.toList modes) (\f tt -> fromJust $ Map.lookup (f,tt) transitions)
-  (modes,transitions) = buildPre (mkDelta sigma) sigma pre0
+  (modes,transitions) = buildPre (mkDelta sigma)  pre0
 
 getCookedSuccessPatterns :: (Ord idp, Ord idt, Ord var, Ppr idt) =>
                             Program'' idp (Term' idt var) -> Interpretation idp (Expr (Any :+: Compound :+: NotVar :+: PrologTerm idt))
@@ -133,15 +133,16 @@ getCookedSuccessPatterns  pl = fixEq (tp_preinterpretation pl' ta) mempty where
 
 -- | In this version we avoid generating the transitions map, encoding it as a Haskell function instead.
 --   Improves time efficiency in at least 50%
-getCookedSuccessPatterns' :: (Ord idp, Ord idt, Ord var, Ppr idt) =>
-                             Program'' idp (Term' idt var) -> Interpretation idp (Expr (Any :+: Compound :+: NotVar :+: PrologTerm idt))
+getCookedSuccessPatterns' :: ( Ord idp, Ord idt, Ord var, Ppr idt
+                             , dom ~ (Any :+: Static :+: Compound :+: NotVar :+: PrologTerm idt)) =>
+                             Program'' idp (Term' idt var) -> Interpretation idp (Expr dom)
 getCookedSuccessPatterns'  pl = fixEq (tp_preinterpretation pl' ta) mempty where
   pl' = prepareProgram pl
   PrologSig sigma _   = getPrologSignature1 pl'
   ta  = mkClauseAssignment (Just . id1) (Set.toList modes)
                  (\f tt -> case () of
                              _ | [] <- tt -> notvar
-                             _ | all (not.isAny) tt -> notvar
+                             _ | all (not.isAny) tt -> static
                              _ | otherwise -> compound (reinject f) (map (\m -> if isAny m then any else notvar) tt))
   (modes,_) = cookPre sigma
 
@@ -154,7 +155,7 @@ getAbstractComp mkDelta pl = (pre, fmap2 (mapPredId reinject) dencc `mappend` cc
   PrologSig sigma _ = getPrologSignature1 pl'
   pl'            = prepareProgram pl
   (_, dencc, cc')= abstractCompilePre compileSet pre pl'
-  pre@(dom,tran) = buildPre (mkDelta sigma) sigma pre0
+  pre@(dom,tran) = buildPre (mkDelta sigma) pre0
 
 getCookedAbstractComp :: (Ord idp, Ord id, Ppr id, Ppr idp, ft ~ PrologTerm id,
                           f ~ (Any :+: Compound :+: NotVar :+: ft), fp ~ (T idp :+: DenotesT id :+: Domain)) =>
@@ -179,14 +180,14 @@ getSuccessPatterns' mkDelta pl =
  where
   pl'                 = prepareProgram pl -- :: Program'' (Expr idp) (TermC' idt VName)
   PrologSig sigma'  _ = getPrologSignature1 pl'
-  pre@(dom,tran)      = buildPre (mkDelta sigma') sigma' pre0
+  pre@(dom,tran)      = buildPre (mkDelta sigma') pre0
   (_, dencc, cc')     = abstractCompilePre compileSet pre pl'
 
 -- ------------
 -- Driver
 -- ------------
 computeSuccessPatterns :: forall idp t t' as.
-                          (idp ~ (T String :+: QueryAnswer String :+: Inst), as ~ Abstract String, t ~ DatalogTerm (Expr as), t' ~ (Free (T (Expr as)) VName)) =>
+                          (idp ~ (T String :+: QueryAnswer String), as ~ Abstract String, t ~ DatalogTerm (Expr as), t' ~ (Free (T (Expr as)) VName)) =>
                           Int -> Bool -> Maybe (GoalF String t) -> Program'' String (Term' String VName) -> FilePath -> [FilePath] -> IO ([Expr as], [[GoalF (Expr idp) t']])
 computeSuccessPatterns depth verbose mb_goal_ pl fp bdd_paths = do
          bddbddb_jar <- findBddJarFile bdd_paths
@@ -390,7 +391,7 @@ abstractCompilePre AbstractCompile{..} (dom, transitions) cc = (domainrules, den
     = let fv = Set.toList(Set.fromList(foldMap vars' h) `Set.difference` Set.fromList (foldMap2 vars' b))
       in h :- (b ++ map (\v -> Pred domain [return v]) fv)
 
-type Abstract idt = Any :+: NotVar :+: Static :+: Compound :+: PrologTerm idt
+type Abstract idt = FreeArg :+: NotVar :+: Static :+: Compound :+: PrologTerm idt
 
 abstractCompilePre' :: (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, idp :<: (DenotesT idt :+: idp),
                          var    ~ Either WildCard VName,
@@ -398,32 +399,61 @@ abstractCompilePre' :: (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, idp :<: (Den
                          pgmden ~ AbstractDatalogProgram (NotAny :+: DenotesT idt) d,
                          pgm    ~ AbstractDatalogProgram (DenotesT idt :+: idp) d,
                          d ~ Expr (Abstract idt)) =>
-                         Program'' (Expr idp) (TermC idt)  -- ^ Original Program
-                      -> ([d], pgmany, pgmden,pgm)         -- ^ (domain, notAny, denotes, program)
+                         Int                                -- ^ Depth of the Preinterpretation used
+                      ->  Program'' (Expr idp) (TermC idt)  -- ^ Original Program
+                      -> ([d], pgmany, pgmden,pgm)          -- ^ (domain, notAny, denotes, program)
 
-abstractCompilePre' pl = (dom, notanyRules, denoteRules, cc') where
+{-
+abstractCompilePre' 0 pl = (dom, notanyRules, denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature1 pl
-  dom = any : static :
-        [ compound (reinject f) args | (f,i) <- Map.toList constructors
-                                     , i>0
-                                     , args <- replicateM i [notvar, any]
-                                     ]
-  notanyRules = [Pred notAny [term0 d] :- [] | d <- tail dom]
-  denoteRules = [Pred (denotes f) (args ++ [term0 res]) :- notany_vars
-                | (f, a) <- Map.toList constructors, a > 0
-                , groundness <- [0..2^a - 1]
-                , let bits = reverse $ take a (reverse(dec2bin groundness) ++ repeat False)
-                , let args = zipWith (\isnotvar v -> if isnotvar then v else term0 any) bits vars
-                , let res  = compound (reinject f) ((notvar?:any) <$> bits)
-                , let notany_vars = [Pred notAny [v] | (True,v) <- zip bits vars]
-                ] ++
-                [ Pred (denotes f) (replicate (a+1) (term0 static)) :- []
+  dom = [any, static]
+  notanyRules = [Pred notAny [term0 static] :- [] ]
+
+  denoteRules = [ Pred (denotes f) (replicate (a+1) (term0 static)) :- []
                 | (f,a) <- Map.toList constructors
                 ] ++
                 [ Pred (denotes f) (replicate (a+1) (term0 any)) :- []
                 | (f,a) <- Map.toList constructors, a >0
                 ]
 
+  vars = (return . Right . Auto) <$> [0..]
+
+  cc' = map ( introduceWildcards
+            . runFresh (flattenDupVarsC isLeft)
+            . (\c -> fmap2 (mapFree (\t@(Term1 id tt) -> if null tt then T (reinject id)
+                                                         else (error ("abstractCompilePre: " ++ show (ppr c)))))
+                           c)
+            . runFresh (flattenC (\(Impure(Term1 id tt)) v -> Pred (denotes id) (tt++[return v])))
+            . fmap (mapPredId reinject)
+            ) pl
+
+  mkVar i = (return $ Right $ Auto i)
+
+  runFresh m c = m c `evalState` ([Right $ Auto i | i <-  [1..]] \\ foldMap2 vars' c)
+-}
+abstractCompilePre' 1 pl = (dom, notanyRules, denoteRules, cc') where
+  PrologSig constructors _ = getPrologSignature1 pl
+  dom = freeArg : static :
+        [ compound (reinject f) args | (f,i) <- Map.toList constructors
+                                     , i>0
+                                     , args <- replicateM i [notvar, freeArg]
+                                     ]
+  notanyRules = [Pred notAny [term0 d] :- [] | d <- tail dom]
+
+  denoteRules = [Pred (denotes f) (args ++ [term0 res]) :- notany_vars
+                | (f, a) <- Map.toList constructors, a > 0
+                , groundness <- [0..2^a - 1]
+                , let bits = reverse $ take a (reverse(dec2bin groundness) ++ repeat False)
+                , let args = zipWith (\isnotvar v -> if isnotvar then v else term0 freeArg) bits vars
+                , let res  = compound (reinject f) ((notvar?:freeArg) <$> bits)
+                , let notany_vars = [Pred notAny [v] | (True,v) <- zip bits vars]
+                ] ++
+                [ Pred (denotes f) (replicate (a+1) (term0 static)) :- []
+                | (f,a) <- Map.toList constructors
+                ] {- ++
+                [ Pred (denotes f) (replicate a (term0 freeArg) ++ [term0 any]) :- []
+                | (f,a) <- Map.toList constructors, a > 0
+                ] -}
 
   vars = (return . Right . Auto) <$> [0..]
 
@@ -468,16 +498,20 @@ prepareTerm = foldFree (return . Right) f where
 -- | The framework introduces a distinguished object V in the abstract language
 --   to model variables (no term evaluates to V).
 data V a = V deriving (Eq,Ord)
-mkV = inject V
+mkV = inject V; isV (match -> Just V) = True; isV _ = False
 
 pre0 :: (Any :<: f, V :<: id) => PreInterpretationSet id f
 pre0 = (Set.singleton (Set.singleton any), Map.singleton (mkV,[])
                                                          (Set.singleton any))
 
+pre0var :: (V :<: f, V :<: id) => PreInterpretationSet id f
+pre0var = (Set.singleton (Set.singleton mkV), Map.singleton (mkV,[])
+                                                         (Set.singleton mkV))
+
 -- | Completes a preinterpretation from a Delta function and a signature
 buildPre :: (Ord id, Ord da, Ppr id, Ppr da) =>
-            DeltaMany id da -> Arity id -> PreInterpretationSet' id da -> PreInterpretationSet' id da
-buildPre (DeltaMany delta) sigma = fixEq f
+            (DeltaMany id da, Arity id) -> PreInterpretationSet' id da -> PreInterpretationSet' id da
+buildPre (DeltaMany delta, sigma) = fixEq f
  where
  f (qd, delta_d)
    | tracePpr (text "buildPre " <> parens (ppr qd <> comma <+> ppr delta_d)) False = undefined
@@ -507,9 +541,8 @@ static = inject Static
 isStatic (match -> Just Static{}) = True ; isStatic _ = False
 
 
-notvarAny0 :: (Ord (f'(Expr f')), Ord (f(Expr f)), f' :<: f, Any :<: f, NotVar :<: f) => MkPre f' f
-notvarAny0 sig = toDeltaMany (mkDeltaAny sig) `mappend`
-                 toDeltaMany  deltaNotVar
+--notvarAny0 :: (Ord (f'(Expr f')), Ord (f(Expr f)), f' :<: f, Any :<: f, NotVar :<: f) => MkPre f' f
+notvarAny0 sig = (toDeltaMany (mkDeltaAny sig) `mappend` toDeltaMany  deltaNotVar, sig) -- TODO Fix like in notVarAny1
  where
   deltaNotVar= Map.fromList [ ((reinject f, replicate i notvar), notvar)| (f,i) <- Map.toList sig]
 
@@ -524,18 +557,26 @@ type NotVarAny1 = Any :+: NotVar :+: Compound
 compound id = inject . Compound id
 
 
-notvarAny1 :: (Ord (Expr f), Ord (Expr f'), Compound :<: f',  Static :<: f', Any :<: f', NotVar :<: f', f :<: f') => MkPre f f'
-notvarAny1 sig = -- toDeltaMany (mkDeltaAny sig) `mappend`
-                 toDeltaMany (Map.fromList delta)
+data FreeArg a = FreeArg deriving (Eq,Ord,Show)
+instance PprF FreeArg where pprF _ = text "free"
+instance Functor FreeArg where fmap f _ = FreeArg
+freeArg = inject FreeArg; isFree (match -> Just FreeArg) = True; isFree _ = False
+
+notvarAny1 :: (Ord (Expr f), V :<: f, Ord (Expr f'), Compound :<: f',  Static :<: f', FreeArg :<: f', Any :<: f', NotVar :<: f', f :<: f') => MkPre f f'
+notvarAny1 sig = (
+                  toDeltaMany (mkDeltaAny sig') `mappend` 
+                  toDeltaMany (Map.fromList delta), sig')
   where
-   domain = any : static : [ compound (reinject f) args
-                            | (f,i) <- Map.toList sig, args <- replicateM i [any,notvar], Prelude.any isAny args]
-   delta  =     [((f,args),  res)
+   sig'   = sig `mappend` Map.singleton mkV 0
+   domain = static : [ compound (reinject f) args
+                            | (f,i) <- Map.toList sig, args <- replicateM i [freeArg,notvar], Prelude.any isFree args]
+   delta  =     ((mkV,[]), freeArg) :
+                [((f,args),  res)
                 | (f, a) <- Map.toList sig, a > 0
                 , groundness <- [0..2^a - 1]
                 , let bits = reverse $ take a (reverse(dec2bin groundness) ++ repeat False)
-                , args <- Prelude.mapM (\isnotvar -> if isnotvar then drop 1 domain else [any]) bits
-                , let res  = compound (reinject f) ((notvar?:any) <$> bits)
+                , args <- Prelude.mapM (\isnotvar -> if isnotvar then domain else [freeArg]) bits
+                , let res  = compound (reinject f) ((notvar?:freeArg) <$> bits)
                 ] ++
                 [ ((f, replicate a static), static)
                 | (f,a) <- Map.toList sig
@@ -664,13 +705,14 @@ instance (Monoid w, Monad m) => MonadFresh VName (RWST r w (Sum Int) m) where fr
 --trace _ = id
 tracePpr msg = id -- trace (render msg)
 
-preSD_cons = buildPre (notvarAny0 list_sig) list_sig
+
+preSD_cons = buildPre (notvarAny0 list_sig)
 
 data List a = List | ListList deriving (Eq,Show,Ord,Bounded)
 type ListSum = Expr(List :+: Any)
 list = inject List
 listlist = inject ListList
-pre_ex6  = buildPre tran sig where
+pre_ex6  = buildPre (tran, sig) where
   sig  = list_sig `mappend` peano_sig
   tran = toDeltaMany(mkDeltaAny sig) `mappend`
          mkDeltaMany [ ((mkT "nil",  [])               , [list])

@@ -18,6 +18,7 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import qualified Data.Map as Map
 import Data.Map (Map)
+import Data.Term.Var
 
 import Language.Prolog.Signature ()
 import TRS.Signature

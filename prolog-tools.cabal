@@ -13,7 +13,7 @@ author: Pepe Iborra
 
 Library
   buildable: True
-  build-depends: base, prolog, containers, mtl, TRS, alacarte, control-monad-free >= 0.4
+  build-depends: base, term, prolog, containers, mtl, TRS, alacarte, control-monad-free >= 0.4
   exposed-modules:
      Language.Prolog.Signature
      Language.Prolog.SharingAnalysis

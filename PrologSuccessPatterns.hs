@@ -20,13 +20,15 @@ import Data.List (elemIndex, nub, nubBy, sort, sortBy, groupBy, foldl', (\\))
 import Data.Maybe
 import Data.AlaCarte
 import Data.Monoid hiding (Any)
+import Data.Term (MonadFresh(..))
+import Data.Term.Var
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 --import Data.Traversable as T hiding (forM)
 import Language.Prolog.Parser as Prolog (program)
 import qualified Language.Prolog.Parser as PrologP
 import Language.Prolog.PreInterpretation
-import Language.Prolog.Semantics (eval,debug, equiv, unifies, matches, MonadFresh(..))
+import Language.Prolog.Semantics (eval,debug)
 import Language.Prolog.Signature
 import Language.Prolog.Syntax as Prolog
 import Language.Prolog.Transformations
@@ -116,7 +118,7 @@ goalParser = PrologP.whiteSpace >> Pred <$> PrologP.ident <*> PrologP.parens (Pr
                 ,((Parsec.string "static" >> return()) <|> (oneOf "gbi" >> return ())) >> return (term0 static)
                 , (>>= return . Right) <$> PrologP.var
                 ]
-       nextVar = getState >>= \st -> setState (st+1) >> return2 (Right (Auto st))
+       nextVar = getState >>= \st -> setState (st+1) >> return2 (Right (VAuto st))
 
 parsePrologProblem fp input = either (error . show) id $ do
      things <- runParser problemParser 0 fp input
@@ -129,7 +131,8 @@ parsePrologProblem fp input = either (error . show) id $ do
 -- Command Line Opts
 -- -------------------
 
-usage = "PrologSuccessPatterns - Computation of abstract success patterns using a preinterpretation"
+usage = "PrologSuccessPatterns - Computation of abstract success patterns using a preinterpretation\n" ++
+        "USAGE: PrologSuccessPatterns [options] file.pl <goal>"
 
 data Opts = Opts  { classpath :: [String]
                   , bddbddb_path :: [String]
@@ -157,16 +160,16 @@ getOptions = do
           goal        = if nogoals
                           then Nothing
                           else  fmap (either (error.show) id . runParser goalParser 0 "goal")
-                                     (listToMaybe (tail nonOptions))
+                                     (listToMaybe (drop 1 nonOptions))
                                 `mplus` listToMaybe goals
       return (opts{problemFile,pl,goal}, nonOptions)
 
 
-opts = [ Option "" ["bddbdd"]         (ReqArg setBddbddb "PATH") "Path to the bddbddb jar file"
+opts = [ Option "" ["bddbddb"]         (ReqArg setBddbddb "PATH") "Path to the bddbddb jar file"
        , Option "" ["cp","classpath"] (ReqArg setCP "PATHS")     "Additional classpath for the Java VM"
        , Option "b" [] (NoArg (\opts -> return opts{mode=Bddbddb}))  "Use bddbddb to compute the approximation (DEFAULT)"
        , Option "f" [] (NoArg (\opts -> return opts{mode=Fixpoint})) "Solve the fixpoint equation to compute the approximation (slower)"
-       , Option "" ["nogoals","bottomup"] (NoArg setNogoals)     "Ignore any goals and do a bottom-up analysis"
+       , Option "" ["nogoals","bottomup"] (NoArg setNogoals)     "Ignore any goals and force a bottom-up analysis"
        , Option "h?" ["help"] (NoArg $ \_ -> putStrLn (usageInfo usage opts) >> exitSuccess) "Displays this help screen"
        ]
 

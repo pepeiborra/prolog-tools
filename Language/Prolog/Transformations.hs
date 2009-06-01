@@ -25,7 +25,9 @@ import qualified Data.Set as Set
 import qualified Data.Traversable as T
 import Data.Traversable (Traversable, sequenceA)
 import Language.Prolog.Syntax
-import Language.Prolog.Semantics (matches, equiv, MonadFresh(..))
+import Data.Term
+import Data.Term.Rules
+import Data.Term.Var
 import Language.Prolog.Utils
 import Text.PrettyPrint as Ppr
 
@@ -90,7 +92,7 @@ instance Ppr id => PprF (QueryAnswer id) where
     pprF (QueryAll id)  = text "query_" <> ppr id
     pprF (Query id i j) = text "query_" <> Ppr.int i <> text "_" <> Ppr.int j <> text "_" <> ppr id
 
-queryAnswer :: (Monad mt, QueryAnswer idp :<: idp', term ~ mt (Either b VName)) =>
+queryAnswer :: (Monad mt, QueryAnswer idp :<: idp', term ~ mt (Either b Var)) =>
                    Program'' idp term -> Program'' (Expr idp') term
 queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
  where
@@ -108,9 +110,9 @@ queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
      | (j,(bleft, Pred bj bj_args :_)) <- zip [2..] (map (`splitAt` drop i cc)  [1..length cc - 1])]
 
 queryAllquery h ar i j = let vars = take ar allvars in Pred (queryAll h) vars :- [Pred (query h i j) vars]
-  where allvars = map (return . Right . Auto) [1..]
+  where allvars = map (return . Right . VAuto) [1..]
 
-queryAnswerGoal :: (Monad mt, QueryAnswer idp :<: idp', term ~ mt (Either b VName)) =>
+queryAnswerGoal :: (Monad mt, QueryAnswer idp :<: idp', term ~ mt (Either b Var)) =>
                    GoalF idp term -> Program'' (Expr idp') term
 
 queryAnswerGoal  (Pred g g_args)  = [Pred (query g 0 1) g_args :- [], queryAllquery g (length g_args) 0 1]
@@ -137,7 +139,7 @@ abstract dom = fixEq abstractF where
     arity = length tt
     go ii = [ p | p <- patterns, all (`Set.member` ccset) (explodeAt ii p) ] where
      patterns =
-        Pred f <$> ( filter ((>0) . length . filter isVar) . nubBy equiv . Prelude.sequence)
+        Pred f <$> ( filter ((>0) . length . filter isVar) . nubBy equiv' . Prelude.sequence)
                     [ maybe (zipTT !! i) (const [var' 0, var' 1]) (elemIndex i ii)
                     | i <- [0..arity-1]
                     ]
@@ -149,8 +151,8 @@ abstract dom = fixEq abstractF where
                     Just t  -> t
                     Nothing -> return v
 
-  compress patterns = let p' = zipIt patterns in (p' ++) . filter (\c -> not (Prelude.any (`matches` c) p'))
+  compress patterns = let p' = zipIt patterns in (p' ++) . filter (\c -> not (Prelude.any (`matches'` c) p'))
   zipIt = foldl' f [] . groupBy ((==) `on` (length . getVars)) . sortBy (compare `on` (length . getVars))
    where
      f acc xx = acc ++ filter (not.consequence) (snub xx) where
-         consequence c = Prelude.any (`matches` c) acc
+         consequence c = Prelude.any (`matches'` c) acc

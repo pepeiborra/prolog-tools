@@ -47,7 +47,8 @@ import qualified Data.Traversable as T
 import Data.Traversable (Traversable(..))
 import Text.PrettyPrint as Ppr
 
-import Language.Prolog.Semantics (MonadFresh(..), matches, equiv)
+import Data.Term (MonadFresh(..))
+import Data.Term.Var
 import Language.Prolog.Syntax hiding (Cons, Nil, Wildcard, String, cons, nil, wildcard, string)
 import Language.Prolog.Transformations
 import Language.Prolog.Utils
@@ -65,12 +66,12 @@ import qualified Prelude
 
 -- Types
 -- -----
-type TermC  idt     = TermC' idt VName
+type TermC  idt     = TermC' idt Var
 type TermC' idt var = Term1 (Expr (PrologTerm idt)) (Either WildCard var)
 
 type PrologTerm idt = PrologT :+: T idt :+: V
 
-type DatalogTerm  d  = Term0 d (Either WildCard VName)
+type DatalogTerm  d  = Term0 d (Either WildCard Var)
 type DatalogTerm' f  = DatalogTerm (ObjectSet f)
 type DatalogProgram idp idt = [ClauseF (GoalF idp (DatalogTerm idt)) ]
 type AbstractDatalogProgram  idp d = Program'' (Expr idp) (DatalogTerm d)
@@ -178,7 +179,7 @@ getSuccessPatterns' mkDelta pl =
 --  liftI (Set.filter (not.isDenotes.pred))
         (fixEq (tp_herbrand (Just . id0) T (fmap2 (mapPredId reinject) dencc `mappend` cc')) mempty)
  where
-  pl'                 = prepareProgram pl -- :: Program'' (Expr idp) (TermC' idt VName)
+  pl'                 = prepareProgram pl -- :: Program'' (Expr idp) (TermC' idt Var)
   PrologSig sigma'  _ = getPrologSignature1 pl'
   pre@(dom,tran)      = buildPre (mkDelta sigma') pre0
   (_, dencc, cc')     = abstractCompilePre compileSet pre pl'
@@ -187,8 +188,8 @@ getSuccessPatterns' mkDelta pl =
 -- Driver
 -- ------------
 computeSuccessPatterns :: forall idp t t' as.
-                          (idp ~ (T String :+: QueryAnswer String), as ~ Abstract String, t ~ DatalogTerm (Expr as), t' ~ (Free (T (Expr as)) VName)) =>
-                          Int -> Bool -> Maybe (GoalF String t) -> Program'' String (Term' String VName) -> FilePath -> [FilePath] -> IO ([Expr as], [[GoalF (Expr idp) t']])
+                          (idp ~ (T String :+: QueryAnswer String), as ~ Abstract String, t ~ DatalogTerm (Expr as), t' ~ (Free (T (Expr as)) Var)) =>
+                          Int -> Bool -> Maybe (GoalF String t) -> Program'' String (Term' String Var) -> FilePath -> [FilePath] -> IO ([Expr as], [[GoalF (Expr idp) t']])
 computeSuccessPatterns depth verbose mb_goal_ pl fp bdd_paths = do
          bddbddb_jar <- findBddJarFile bdd_paths
          let mb_goal = (fmap (introduceWildcards . runFresh (flattenDupVarsC isLeft)) . queryAnswerGoal)
@@ -394,7 +395,7 @@ abstractCompilePre AbstractCompile{..} (dom, transitions) cc = (domainrules, den
 type Abstract idt = FreeArg :+: NotVar :+: Static :+: Compound :+: PrologTerm idt
 
 abstractCompilePre' :: (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, idp :<: (DenotesT idt :+: idp),
-                         var    ~ Either WildCard VName,
+                         var    ~ Either WildCard Var,
                          pgmany ~ AbstractDatalogProgram  NotAny d,
                          pgmden ~ AbstractDatalogProgram (NotAny :+: DenotesT idt) d,
                          pgm    ~ AbstractDatalogProgram (DenotesT idt :+: idp) d,
@@ -416,7 +417,7 @@ abstractCompilePre' 0 pl = (dom, notanyRules, denoteRules, cc') where
                 | (f,a) <- Map.toList constructors, a >0
                 ]
 
-  vars = (return . Right . Auto) <$> [0..]
+  vars = (return . Right . VAuto) <$> [0..]
 
   cc' = map ( introduceWildcards
             . runFresh (flattenDupVarsC isLeft)
@@ -427,9 +428,9 @@ abstractCompilePre' 0 pl = (dom, notanyRules, denoteRules, cc') where
             . fmap (mapPredId reinject)
             ) pl
 
-  mkVar i = (return $ Right $ Auto i)
+  mkVar i = (return $ Right $ VAuto i)
 
-  runFresh m c = m c `evalState` ([Right $ Auto i | i <-  [1..]] \\ foldMap2 vars' c)
+  runFresh m c = m c `evalState` ([Right $ VAuto i | i <-  [1..]] \\ foldMap2 vars' c)
 -}
 abstractCompilePre' 1 pl = (dom, notanyRules, denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature1 pl
@@ -455,7 +456,7 @@ abstractCompilePre' 1 pl = (dom, notanyRules, denoteRules, cc') where
                 | (f,a) <- Map.toList constructors, a > 0
                 ] -}
 
-  vars = (return . Right . Auto) <$> [0..]
+  vars = (return . Right . VAuto) <$> [0..]
 
   cc' = map ( introduceWildcards
             . runFresh (flattenDupVarsC isLeft)
@@ -466,9 +467,9 @@ abstractCompilePre' 1 pl = (dom, notanyRules, denoteRules, cc') where
             . fmap (mapPredId reinject)
             ) pl
 
-  mkVar i = (return $ Right $ Auto i)
+  mkVar i = (return $ Right $ VAuto i)
 
-  runFresh m c = m c `evalState` ([Right $ Auto i | i <-  [1..]] \\ foldMap2 vars' c)
+  runFresh m c = m c `evalState` ([Right $ VAuto i | i <-  [1..]] \\ foldMap2 vars' c)
 
 compileSet = AbstractCompile { mkDomain  = False
                              , id2domain = Set.singleton . reinject
@@ -617,7 +618,7 @@ anyOrElseNotVar m = if isAny m then any else notvar
 deriving instance Ord (f(Expr f)) => Ord (Expr f)
 deriving instance (Ppr id, Ppr [da]) => Ppr (DeltaMany id da)
 
-runFresh m c  = m c `evalState` ([Right $ Auto i | i <-  [1..]] \\ foldMap2 vars' c)
+runFresh m c  = m c `evalState` ([Right $ VAuto i | i <-  [1..]] \\ foldMap2 vars' c)
 
 
 withTempFile dir name m = bracket (openTempFile dir' name') (removeFile . fst) (uncurry m)
@@ -690,15 +691,6 @@ instance PprF NotAny where pprF NotAny = text "notAny"
 instance Functor (Denotes idt) where fmap _ (Denotes id) = Denotes id
 instance Functor NotAny        where fmap _ NotAny = NotAny
 instance Functor Domain        where fmap _ Domain = Domain
-
-#ifdef GHCI
--- NI CONTIGO NI SIN TI: Si la incluyo, Cabal ve un duplicado. Si no la incluyo, GHCi no ve ninguna.
--- Brought this instance here from the prolog package.
--- For some reason GHC 6.10.2 refuses to export it
-instance (Monoid w, Monad m) => MonadFresh VName (RWST r w (Sum Int) m) where freshVar = modify Prelude.succ >> liftM (Auto . getSum . Prelude.pred) get
---instance (Monoid w, MonadFresh var m) => MonadFresh var (WriterT w m) where freshVar = lift freshVar
---instance Monad m => MonadFresh v (StateT [v] m)  where freshVar = do { x:xx <- get; put xx; return x}
-#endif
 
 -- Testing
 -- -------

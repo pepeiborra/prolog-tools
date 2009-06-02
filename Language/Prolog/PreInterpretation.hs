@@ -48,6 +48,7 @@ import Data.Traversable (Traversable(..))
 import Text.PrettyPrint as Ppr
 
 import Data.Term (MonadFresh(..))
+import Data.Term.Rules
 import Data.Term.Var
 import Language.Prolog.Syntax hiding (Cons, Nil, Wildcard, String, cons, nil, wildcard, string)
 import Language.Prolog.Transformations
@@ -469,8 +470,6 @@ abstractCompilePre' 1 pl = (dom, notanyRules, denoteRules, cc') where
 
   mkVar i = (return $ Right $ VAuto i)
 
-  runFresh m c = m c `evalState` ([Right $ VAuto i | i <-  [1..]] \\ foldMap2 vars' c)
-
 compileSet = AbstractCompile { mkDomain  = False
                              , id2domain = Set.singleton . reinject
                              , domain2Term = term0 . Set.mapMonotonic reinject
@@ -618,7 +617,7 @@ anyOrElseNotVar m = if isAny m then any else notvar
 deriving instance Ord (f(Expr f)) => Ord (Expr f)
 deriving instance (Ppr id, Ppr [da]) => Ppr (DeltaMany id da)
 
-runFresh m c  = m c `evalState` ([Right $ VAuto i | i <-  [1..]] \\ foldMap2 vars' c)
+runFresh m c  = m c `evalState` ([toEnum 1..] \\ getVars c)
 
 
 withTempFile dir name m = bracket (openTempFile dir' name') (removeFile . fst) (uncurry m)

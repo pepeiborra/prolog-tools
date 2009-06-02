@@ -64,7 +64,7 @@ flattenC box clause@(h :- b) = do
     tell [box (Impure t') v]
     return2 v
 
-data WildCard = WildCard deriving (Eq, Ord)
+data WildCard = WildCard deriving (Enum, Eq, Ord, Bounded)
 wildCard = return (Left WildCard)
 instance Ppr WildCard           where ppr _ = text "_"
 
@@ -92,7 +92,7 @@ instance Ppr id => PprF (QueryAnswer id) where
     pprF (QueryAll id)  = text "query_" <> ppr id
     pprF (Query id i j) = text "query_" <> Ppr.int i <> text "_" <> Ppr.int j <> text "_" <> ppr id
 
-queryAnswer :: (Monad mt, QueryAnswer idp :<: idp', term ~ mt (Either b Var)) =>
+queryAnswer :: (Enum var, Monad mt, QueryAnswer idp :<: idp', term ~ mt var) =>
                    Program'' idp term -> Program'' (Expr idp') term
 queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
  where
@@ -107,12 +107,12 @@ queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
      [[Pred (query bj i j) bj_args :- ([Pred (answer c) c_args | Pred c c_args <- bleft] ++
                                        [Pred (queryAll h) h_args])
       ,queryAllquery bj (length bj_args) i j]
-     | (j,(bleft, Pred bj bj_args :_)) <- zip [2..] (map (`splitAt` drop i cc)  [1..length cc - 1])]
+     | (j,(bleft, Pred bj bj_args :_)) <- zip [2..] (map (`splitAt` cc)  [1..length cc - 1])]
 
 queryAllquery h ar i j = let vars = take ar allvars in Pred (queryAll h) vars :- [Pred (query h i j) vars]
-  where allvars = map (return . Right . VAuto) [1..]
+  where allvars = map (return . toEnum)  [1..]
 
-queryAnswerGoal :: (Monad mt, QueryAnswer idp :<: idp', term ~ mt (Either b Var)) =>
+queryAnswerGoal :: (Enum var, Monad mt, QueryAnswer idp :<: idp', term ~ mt var) =>
                    GoalF idp term -> Program'' (Expr idp') term
 
 queryAnswerGoal  (Pred g g_args)  = [Pred (query g 0 1) g_args :- [], queryAllquery g (length g_args) 0 1]
@@ -158,3 +158,30 @@ compress patterns = let p' = zipIt patterns in (p' ++) . filter (\c -> not (Prel
      numVars = length . getVars
      f acc xx = acc ++ filter (not.consequence) (nubBy equiv' xx) where
          consequence c = Prelude.any (`matches'` c) acc
+
+-- -------------------------
+-- Additional instances
+-- -------------------------
+-- Enum instance for Either
+instance (Enum a, Bounded a, Enum b, Bounded b) => Enum (Either a b) where
+  toEnum i
+      | i > minB * 2 = if minB == ma then Right (toEnum (i - minB))
+                                     else Left  (toEnum (i - minB))
+      | even i    = Right (toEnum (i `div` 2))
+      | otherwise = Left  (toEnum (i `div` 2))
+   where minB = min ma mb
+         ma   = fromEnum (maxBound :: a)
+         mb   = fromEnum (maxBound :: b)
+  fromEnum (Right x)
+      | fx < ma =  fx * 2
+      | otherwise = ma + fx
+   where fx = fromEnum x
+         ma = fromEnum (maxBound :: a)
+  fromEnum (Left x)
+      | fx < mb =  fx * 2 + 1
+      | otherwise = mb + fx
+   where fx = fromEnum x
+         mb = fromEnum (maxBound :: b)
+
+-- Bounded instance for Var
+instance Bounded Var where minBound = VAuto minBound; maxBound = VAuto maxBound

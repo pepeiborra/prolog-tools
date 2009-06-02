@@ -190,8 +190,8 @@ getSuccessPatterns' mkDelta pl =
 -- ------------
 computeSuccessPatterns :: forall idp t t' as.
                           (idp ~ (T String :+: QueryAnswer String), as ~ Abstract String, t ~ DatalogTerm (Expr as), t' ~ (Free (T (Expr as)) Var)) =>
-                          Int -> Bool -> Maybe (GoalF String t) -> Program'' String (Term' String Var) -> FilePath -> [FilePath] -> IO ([Expr as], [[GoalF (Expr idp) t']])
-computeSuccessPatterns depth verbose mb_goal_ pl fp bdd_paths = do
+                          Int -> Int -> Maybe (GoalF String t) -> Program'' String (Term' String Var) -> FilePath -> [FilePath] -> IO ([Expr as], [[GoalF (Expr idp) t']])
+computeSuccessPatterns depth verbosity mb_goal_ pl fp bdd_paths = do
          bddbddb_jar <- findBddJarFile bdd_paths
          let mb_goal = (fmap (introduceWildcards . runFresh (flattenDupVarsC isLeft)) . queryAnswerGoal)
                          <$> mb_goal_ :: Maybe (AbstractDatalogProgram idp (Expr as))
@@ -207,8 +207,9 @@ computeSuccessPatterns depth verbose mb_goal_ pl fp bdd_paths = do
          withTempFile "." (fp++".bddbddb") $ \fpbddbddb hbddbddb -> do
 
          -- Domain
+         echo ("The domain is: " ++ show (ppr dom))
          withTempFile "." (fp++".map") $ \fpmap hmap -> do
-         let dump_bddbddb txt = hPutStrLn hbddbddb txt >> when verbose (putStrLn txt)
+         let dump_bddbddb txt = hPutStrLn hbddbddb txt >> echo txt
 
          echo ("writing domain map file to " ++ fpmap)
          dump_bddbddb "### Domains"
@@ -248,7 +249,8 @@ computeSuccessPatterns depth verbose mb_goal_ pl fp bdd_paths = do
          -- Running bddbddb
          hClose hbddbddb
          hClose hmap
-         let cmdline = ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb)
+         let cmdline = if verbosity>1 then  ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb)
+                                      else ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb ++ "> /dev/null 2> /dev/null")
          echo ("Calling bddbddb with command line: " ++ cmdline ++ "\n")
          exitcode <- system cmdline
 
@@ -269,7 +271,7 @@ computeSuccessPatterns depth verbose mb_goal_ pl fp bdd_paths = do
 
     where wildOrInt v "*" = Left v
           wildOrInt _ i   = Right (read i)
-          echo x | verbose   = hPutStrLn stderr x
+          echo x | verbosity>0   = hPutStrLn stderr x
                  | otherwise = return ()
 
           findBddJarFile [] = error "Cannot find bddbddb.jar"

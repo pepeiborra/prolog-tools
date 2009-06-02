@@ -58,10 +58,10 @@ echo = hPutStrLn stderr
 bddbddb_jar_paths = ["bddbddb-full.jar", "bddbddb.jar"]
 
 main = do
-  (Opts{..}, nonOpts) <- getOptions
-  let mkPre :: MkPre Concrete (Any :+: Abstract String) = notvarAny1
+  (opts@Opts{..}, nonOpts) <- getOptions
+  let mkPre :: MkPre Concrete (FreeArg :+: Abstract String) = notvarAny1
   case mode of
-    Bddbddb -> run_bddbddb goal pl problemFile bddbddb_path
+    Bddbddb -> run_bddbddb opts
     Fixpoint -> do
          echo "We obtain the success patterns:"
          print (getSuccessPatterns mkPre pl) -- :: Interpretation (Expr (T String)) (ObjectSet Abstract))
@@ -88,8 +88,8 @@ main = do
          print (getCookedSuccessPatterns pl)
 -}
 
-run_bddbddb mb_goal pl fp bdd_paths = do
-  (dom, results) <- computeSuccessPatterns 1 True mb_goal pl fp bdd_paths
+run_bddbddb Opts{..} = do
+  (dom, results) <- computeSuccessPatterns depth verbosity goal pl problemFile bddbddb_path
   echo "bddbddb produced the following success patterns:\n"
   print (vcat $ map ppr $ concat results)
   echo " \nWe can simplify the patterns as follows:\n"
@@ -141,9 +141,15 @@ data Opts = Opts  { classpath :: [String]
                   , mode      :: Mode
                   , problemFile :: String
                   , pl        :: Program String
+                  , verbosity :: Int
                   }
 
-defOpts = Opts { classpath = [], bddbddb_path = bddbddb_jar_paths, goal=Nothing, mode = Bddbddb, nogoals = False}
+defOpts = Opts { classpath = []
+               , bddbddb_path = bddbddb_jar_paths
+               , goal=Nothing
+               , mode = Bddbddb
+               , nogoals = False
+               , verbosity=1
 
 data Mode = Bddbddb | Fixpoint
 
@@ -170,12 +176,14 @@ opts = [ Option "" ["bddbddb"]         (ReqArg setBddbddb "PATH") "Path to the b
        , Option "b" [] (NoArg (\opts -> return opts{mode=Bddbddb}))  "Use bddbddb to compute the approximation (DEFAULT)"
        , Option "f" [] (NoArg (\opts -> return opts{mode=Fixpoint})) "Solve the fixpoint equation to compute the approximation (slower)"
        , Option "" ["nogoals","bottomup"] (NoArg setNogoals)     "Ignore any goals and force a bottom-up analysis"
+       , Option "v" ["verbose"] (OptArg setVB "0-2") "Set verbosity level (default: 1)"
        , Option "h?" ["help"] (NoArg $ \_ -> putStrLn (usageInfo usage opts) >> exitSuccess) "Displays this help screen"
        ]
 
 setCP arg opts = return opts{classpath = splitBy (== ':') arg}
 setBddbddb arg opts = return opts{bddbddb_path = [arg]}
 setNogoals opts = return opts{nogoals = True}
+setVB arg opts = return opts{verbosity = maybe 1 read arg}
 
 splitBy :: (a->Bool) -> [a] -> [[a]]
 splitBy _ [] = []

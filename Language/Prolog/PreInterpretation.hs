@@ -279,55 +279,6 @@ computeSuccessPatterns depth verbosity mb_goal_ pl fp bdd_paths = do
             x <- doesFileExist fp
             if x then return fp else findBddJarFile fps
 
--- ------------------
--- Fixpoint operator
--- ------------------
--- | The l.f.p. computation of a program according to a Clause Assignment.
-tp_preinterpretation :: (Ord idp, Ord d, term ~ Free termF var, Functor termF, Ord var) =>
-                        Program'' idp term -> ClauseAssignment termF d -> Interpretation idp d -> Interpretation idp d
-tp_preinterpretation p j (I i) = mkI
-                             [ a
-                              | c <- p
-                              , a :- bb <- j c
-                              , Set.fromList bb `Set.isSubsetOf` i]
-
--- | The l.f.p. computation of a minimal Herbrand model of a program with a preinterpretation compiled in.
---   This does not compute the minimal Herbrand model of a program in general
-tp_herbrand :: (Ord idp, Ord var, Ord id, Ord term, term ~ Free (termF id) var, Functor (termF id), Foldable (termF id), d ~ term) =>
-               (forall id a . termF id a -> Maybe id) -- ^ A function to open a term
-            -> (forall id a . id -> termF id a)       -- ^ term constructor
-            -> Program'' idp term        -- ^ The Program
-            -> Interpretation idp d      -- ^ An initial interpretation
-            -> Interpretation idp d      -- ^ The next interpretation (one step application)
-tp_herbrand openTerm mkTerm p (I i) = mkI
-                             [ a
-                              | c <- p
-                              , a :- bb <- j c
-                              , Set.fromList bb `Set.isSubsetOf` i]
-  where
-    PrologSig functors _ = getPrologSignature' openTerm p
-    j c@(h :- cc) = [fmap2 (>>= var_mapping a) c | a <- assignments] where
-      var_mapping ass v | Just d <- Map.lookup v ass = Impure $ mkTerm d
-      assignments   = --assert (all (==0) (Map.elems functors))
-                      ((Map.fromList . zip fv) `map` replicateM (length fv) [f|(f,0) <- Map.toList functors]) -- Assuming all terms are arity 0
-      fv             = snub $ foldMap2 toList (h:cc)
-
--- | A clause assignments is computed from a preinterpretation.
-mkClauseAssignment :: (Show d, Show idf, Traversable termF) =>
-                      (forall d. termF d -> Maybe idf)   -- ^ A function to open the term
-                   -> [d]                                -- ^ The domain as a list of objects
-                   -> (idf -> [d] -> d)                  -- ^ The preinterpretation as a mapping function
-                   -> (forall idp var. Ord var => Clause'' idp (Free termF var) -> [Clause'' idp d])
-
-mkClauseAssignment getTermId domain pre c@(h :- cc) =
-    [runReader (mapM2 (foldFreeM var_mapping pre') c) a | a <- assignments]
-  where
-   pre' = return . uncurry pre . fromMaybe (error "mkClauseAssignment") . openTerm
-   openTerm t = getTermId t >>= \id -> Just (id, toList t)
-   var_mapping v = ask >>= \map -> let Just d = Map.lookup v map in return d
-   assignments = (Map.fromList . zip fv) `map` (replicateM (length fv) domain)
-   fv          = snub(foldMap2 toList (h:cc))
-
 -- ----------------------
 -- Abstract Compilation
 -- ----------------------
@@ -493,6 +444,54 @@ prepareTerm = foldFree (return . Right) f where
     f (Prolog.Cons h t) = term1 cons [h,t]
     f (Prolog.Nil) = term1 nil []
 
+-- ------------------
+-- Fixpoint operator
+-- ------------------
+-- | The l.f.p. computation of a program according to a Clause Assignment.
+tp_preinterpretation :: (Ord idp, Ord d, term ~ Free termF var, Functor termF, Ord var) =>
+                        Program'' idp term -> ClauseAssignment termF d -> Interpretation idp d -> Interpretation idp d
+tp_preinterpretation p j (I i) = mkI
+                             [ a
+                              | c <- p
+                              , a :- bb <- j c
+                              , Set.fromList bb `Set.isSubsetOf` i]
+
+-- | The l.f.p. computation of a minimal Herbrand model of a program with a preinterpretation compiled in.
+--   This does not compute the minimal Herbrand model of a program in general
+tp_herbrand :: (Ord idp, Ord var, Ord id, Ord term, term ~ Free (termF id) var, Functor (termF id), Foldable (termF id), d ~ term) =>
+               (forall id a . termF id a -> Maybe id) -- ^ A function to open a term
+            -> (forall id a . id -> termF id a)       -- ^ term constructor
+            -> Program'' idp term        -- ^ The Program
+            -> Interpretation idp d      -- ^ An initial interpretation
+            -> Interpretation idp d      -- ^ The next interpretation (one step application)
+tp_herbrand openTerm mkTerm p (I i) = mkI
+                             [ a
+                              | c <- p
+                              , a :- bb <- j c
+                              , Set.fromList bb `Set.isSubsetOf` i]
+  where
+    PrologSig functors _ = getPrologSignature' openTerm p
+    j c@(h :- cc) = [fmap2 (>>= var_mapping a) c | a <- assignments] where
+      var_mapping ass v | Just d <- Map.lookup v ass = Impure $ mkTerm d
+      assignments   = --assert (all (==0) (Map.elems functors))
+                      ((Map.fromList . zip fv) `map` replicateM (length fv) [f|(f,0) <- Map.toList functors]) -- Assuming all terms are arity 0
+      fv             = snub $ foldMap2 toList (h:cc)
+
+-- | A clause assignments is computed from a preinterpretation.
+mkClauseAssignment :: (Show d, Show idf, Traversable termF) =>
+                      (forall d. termF d -> Maybe idf)   -- ^ A function to open the term
+                   -> [d]                                -- ^ The domain as a list of objects
+                   -> (idf -> [d] -> d)                  -- ^ The preinterpretation as a mapping function
+                   -> (forall idp var. Ord var => Clause'' idp (Free termF var) -> [Clause'' idp d])
+
+mkClauseAssignment getTermId domain pre c@(h :- cc) =
+    [runReader (mapM2 (foldFreeM var_mapping pre') c) a | a <- assignments]
+  where
+   pre' = return . uncurry pre . fromMaybe (error "mkClauseAssignment") . openTerm
+   openTerm t = getTermId t >>= \id -> Just (id, toList t)
+   var_mapping v = ask >>= \map -> let Just d = Map.lookup v map in return d
+   assignments = (Map.fromList . zip fv) `map` (replicateM (length fv) domain)
+   fv          = snub(foldMap2 toList (h:cc))
 
 -- ------------------------------------------------------
 -- DFTA algorithm to compute a disjoint preinterpretation

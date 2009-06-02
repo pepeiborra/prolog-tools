@@ -138,6 +138,7 @@ usage = "PrologSuccessPatterns - Computation of abstract success patterns using 
 data Opts = Opts  { classpath :: [String]
                   , bddbddb_path :: [String]
                   , goal      :: Maybe (GoalF String (DatalogTerm (Expr (Abstract String))))
+                  , depth     :: Int
                   , nogoals   :: Bool
                   , mode      :: Mode
                   , problemFile :: String
@@ -151,6 +152,7 @@ defOpts = Opts { classpath = []
                , mode = Bddbddb
                , nogoals = False
                , verbosity=1
+               , depth=1}
 
 data Mode = Bddbddb | Fixpoint
 
@@ -173,7 +175,8 @@ getOptions = do
 
 
 opts = [ Option "" ["bddbddb"]         (ReqArg setBddbddb "PATH") "Path to the bddbddb jar file"
-       , Option "" ["cp","classpath"] (ReqArg setCP "PATHS")     "Additional classpath for the Java VM"
+       , Option "d" ["depth"]          (ReqArg setDepth "0-1") "Depth of the approximation (default: 1)"
+       , Option "" ["cp","classpath"]  (ReqArg setCP "PATHS")     "Additional classpath for the Java VM"
        , Option "b" [] (NoArg (\opts -> return opts{mode=Bddbddb}))  "Use bddbddb to compute the approximation (DEFAULT)"
        , Option "f" [] (NoArg (\opts -> return opts{mode=Fixpoint})) "Solve the fixpoint equation to compute the approximation (slower)"
        , Option "" ["nogoals","bottomup"] (NoArg setNogoals)     "Ignore any goals and force a bottom-up analysis"
@@ -185,6 +188,7 @@ setCP arg opts = return opts{classpath = splitBy (== ':') arg}
 setBddbddb arg opts = return opts{bddbddb_path = [arg]}
 setNogoals opts = return opts{nogoals = True}
 setVB arg opts = return opts{verbosity = maybe 1 read arg}
+setDepth arg opts = return opts{depth = min 1 (max 0 (read arg))}
 
 splitBy :: (a->Bool) -> [a] -> [[a]]
 splitBy _ [] = []

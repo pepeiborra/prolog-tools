@@ -346,7 +346,7 @@ abstractCompilePre AbstractCompile{..} (dom, transitions) cc = (domainrules, den
     = let fv = Set.toList(Set.fromList(foldMap vars' h) `Set.difference` Set.fromList (foldMap2 vars' b))
       in h :- (b ++ map (\v -> Pred domain [return v]) fv)
 
-type Abstract idt = FreeArg :+: NotVar :+: Static :+: Compound :+: PrologTerm idt
+type Abstract idt = Any :+: NotVar :+: Static :+: Compound :+: PrologTerm idt
 
 abstractCompilePre' :: (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, idp :<: (DenotesT idt :+: idp),
                          var    ~ Either WildCard Var,
@@ -358,21 +358,16 @@ abstractCompilePre' :: (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, idp :<: (Den
                       ->  Program'' (Expr idp) (TermC idt)  -- ^ Original Program
                       -> ([d], pgmany, pgmden,pgm)          -- ^ (domain, notAny, denotes, program)
 
-{-
-abstractCompilePre' 0 pl = (dom, notanyRules, denoteRules, cc') where
+abstractCompilePre' 0 pl = (dom, [], denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature1 pl
-  dom = [any, static]
-  notanyRules = [Pred notAny [term0 static] :- [] ]
-
-  denoteRules = [ Pred (denotes f) (replicate (a+1) (term0 static)) :- []
-                | (f,a) <- Map.toList constructors
+  dom = [any, static, notvar]
+  denoteRules = [Pred (denotes f) (args ++ [term0 notvar]) :- []
+                | (f, a) <- Map.toList constructors, a > 0
+                , args <- replicateM a [term0 any, term0 notvar]
                 ] ++
-                [ Pred (denotes f) (replicate (a+1) (term0 any)) :- []
-                | (f,a) <- Map.toList constructors, a >0
+                [ Pred (denotes f) (replicate (a+1) (term0 static)) :- []
+                | (f,a) <- Map.toList constructors
                 ]
-
-  vars = (return . Right . VAuto) <$> [0..]
-
   cc' = map ( introduceWildcards
             . runFresh (flattenDupVarsC isLeft)
             . (\c -> fmap2 (mapFree (\t@(Term1 id tt) -> if null tt then T (reinject id)
@@ -382,16 +377,12 @@ abstractCompilePre' 0 pl = (dom, notanyRules, denoteRules, cc') where
             . fmap (mapPredId reinject)
             ) pl
 
-  mkVar i = (return $ Right $ VAuto i)
-
-  runFresh m c = m c `evalState` ([Right $ VAuto i | i <-  [1..]] \\ foldMap2 vars' c)
--}
 abstractCompilePre' 1 pl = (dom, notanyRules, denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature1 pl
-  dom = freeArg : static :
+  dom = any : static :
         [ compound (reinject f) args | (f,i) <- Map.toList constructors
                                      , i>0
-                                     , args <- replicateM i [notvar, freeArg]
+                                     , args <- replicateM i [notvar, any]
                                      ]
   notanyRules = [Pred notAny [term0 d] :- [] | d <- tail dom]
 
@@ -399,8 +390,8 @@ abstractCompilePre' 1 pl = (dom, notanyRules, denoteRules, cc') where
                 | (f, a) <- Map.toList constructors, a > 0
                 , groundness <- [0..2^a - 1]
                 , let bits = reverse $ take a (reverse(dec2bin groundness) ++ repeat False)
-                , let args = zipWith (\isnotvar v -> if isnotvar then v else term0 freeArg) bits vars
-                , let res  = compound (reinject f) ((notvar?:freeArg) <$> bits)
+                , let args = zipWith (\isnotvar v -> if isnotvar then v else term0 any) bits vars
+                , let res  = compound (reinject f) ((notvar?:any) <$> bits)
                 , let notany_vars = [Pred notAny [v] | (True,v) <- zip bits vars]
                 ] ++
                 [ Pred (denotes f) (replicate (a+1) (term0 static)) :- []

@@ -17,7 +17,7 @@ Library
   exposed-modules:
      Language.Prolog.Signature
      Language.Prolog.SharingAnalysis
-     Language.Prolog.ModeAnalysis
+--     Language.Prolog.ModeAnalysis
      Language.Prolog.PreInterpretation
      Language.Prolog.Transformations
   other-modules:

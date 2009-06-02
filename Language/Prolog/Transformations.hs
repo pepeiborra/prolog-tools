@@ -151,8 +151,10 @@ abstract dom = fixEq abstractF where
                     Just t  -> t
                     Nothing -> return v
 
-  compress patterns = let p' = zipIt patterns in (p' ++) . filter (\c -> not (Prelude.any (`matches'` c) p'))
-  zipIt = foldl' f [] . groupBy ((==) `on` (length . getVars)) . sortBy (compare `on` (length . getVars))
+compress patterns = let p' = zipIt patterns in (p' ++) . filter (\c -> not (Prelude.any (`matches'` c) p'))
+ where
+  zipIt = foldl' f [] . groupBy ((==) `on` numVars) . sortBy (compare `on` numVars)
    where
-     f acc xx = acc ++ filter (not.consequence) (snub xx) where
+     numVars = length . getVars
+     f acc xx = acc ++ filter (not.consequence) (nubBy equiv' xx) where
          consequence c = Prelude.any (`matches'` c) acc

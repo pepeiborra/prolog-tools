@@ -190,8 +190,8 @@ getSuccessPatterns' mkDelta pl =
 -- ------------
 computeSuccessPatterns :: forall idp t t' as.
                           (idp ~ (T String :+: QueryAnswer String), as ~ Abstract String, t ~ DatalogTerm (Expr as), t' ~ (Free (T (Expr as)) Var)) =>
-                          Int -> Int -> Maybe (GoalF String t) -> Program'' String (Term' String Var) -> FilePath -> [FilePath] -> IO ([Expr as], [[GoalF (Expr idp) t']])
-computeSuccessPatterns depth verbosity mb_goal_ pl fp bdd_paths = do
+                          Int -> Int -> Bool -> Maybe (GoalF String t) -> Program'' String (Term' String Var) -> FilePath -> [FilePath] -> IO ([Expr as], [[GoalF (Expr idp) t']])
+computeSuccessPatterns depth verbosity debug mb_goal_ pl fp bdd_paths = do
          bddbddb_jar <- findBddJarFile bdd_paths
          let mb_goal = (fmap (introduceWildcards . runFresh (flattenDupVarsC isLeft)) . queryAnswerGoal)
                          <$> mb_goal_ :: Maybe (AbstractDatalogProgram idp (Expr as))
@@ -251,7 +251,7 @@ computeSuccessPatterns depth verbosity mb_goal_ pl fp bdd_paths = do
          hClose hmap
          let cmdline = if verbosity>1 then  ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb)
                                       else ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb ++ "> /dev/null 2> /dev/null")
-         echo ("Calling bddbddb with command line: " ++ cmdline ++ "\n")
+         echo ("\nCalling bddbddb with command line: " ++ cmdline ++ "\n")
          exitcode <- system cmdline
 
          case exitcode of
@@ -263,7 +263,7 @@ computeSuccessPatterns depth verbosity mb_goal_ pl fp bdd_paths = do
                          let fp_result = (takeDirectory fp </> show p ++ show i <.> "tuples")
                          output <- readFile fp_result
                          evaluate (length output)
-                         removeFile fp_result
+                         when (not debug) $ removeFile fp_result
                          let tuples = map (map (uncurry wildOrInt) . zip [1..] . words) (drop 1 $ lines output)
                          return [ Pred p (map (either var' (term0 . (domArray!))) ii)
                                   | ii <- tuples

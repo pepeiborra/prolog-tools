@@ -28,7 +28,7 @@ import qualified Data.Set as Set
 import Language.Prolog.Parser as Prolog (program)
 import qualified Language.Prolog.Parser as PrologP
 import Language.Prolog.PreInterpretation
-import Language.Prolog.Semantics (eval,debug)
+import Language.Prolog.Semantics (eval)
 import Language.Prolog.Signature
 import Language.Prolog.Syntax as Prolog
 import Language.Prolog.Transformations
@@ -89,7 +89,7 @@ main = do
 -}
 
 run_bddbddb Opts{..} = do
-  (dom, results) <- computeSuccessPatterns depth verbosity goal pl problemFile bddbddb_path
+  (dom, results) <- computeSuccessPatterns depth verbosity debug goal pl problemFile bddbddb_path
   echo "bddbddb produced the following success patterns:\n"
   print (vcat $ map ppr $ concat results)
   echo " \nWe can simplify the patterns as follows:\n"
@@ -144,6 +144,7 @@ data Opts = Opts  { classpath :: [String]
                   , problemFile :: String
                   , pl        :: Program String
                   , verbosity :: Int
+                  , debug     :: Bool
                   }
 
 defOpts = Opts { classpath = []
@@ -151,8 +152,9 @@ defOpts = Opts { classpath = []
                , goal=Nothing
                , mode = Bddbddb
                , nogoals = False
-               , verbosity=1
-               , depth=1}
+               , verbosity = 1
+               , debug = False
+               , depth = 1}
 
 data Mode = Bddbddb | Fixpoint
 
@@ -181,6 +183,7 @@ opts = [ Option "" ["bddbddb"]         (ReqArg setBddbddb "PATH") "Path to the b
        , Option "f" [] (NoArg (\opts -> return opts{mode=Fixpoint})) "Solve the fixpoint equation to compute the approximation (slower)"
        , Option "" ["nogoals","bottomup"] (NoArg setNogoals)     "Ignore any goals and force a bottom-up analysis"
        , Option "v" ["verbose"] (OptArg setVB "0-2") "Set verbosity level (default: 1)"
+       , Option ""  ["debug"] (NoArg (\opts -> return opts{debug=True})) "Do not delete intermediate files"
        , Option "h?" ["help"] (NoArg $ \_ -> putStrLn (usageInfo usage opts) >> exitSuccess) "Displays this help screen"
        ]
 

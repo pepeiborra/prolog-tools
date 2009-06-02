@@ -86,7 +86,7 @@ type PreInterpretation'   id d  = (Set d, Delta id d)
 type PreInterpretation    id f  = PreInterpretation' (Expr id) (Expr f)
 type PreInterpretationSet id f  = PreInterpretation' (Expr id) (Set(Expr f))
 type PreInterpretationSet' id d = PreInterpretation' id (Set d)
-type Arity id = Map id Int
+type Arity id = Map id (Set Int)
 
 type MkPre ft fd = Arity (Expr ft) -> (DeltaMany (Expr ft) (Expr fd), Arity (Expr ft))
 
@@ -221,17 +221,17 @@ computeSuccessPatterns depth verbosity mb_goal_ pl fp bdd_paths = do
          -- Relations
          dump_bddbddb "\n### Relations\n"
          dump_bddbddb $ unlines $ map show
-             [ text "denotes_" <> ppr c <> parens (hsep $ punctuate comma $ replicate (a+1) (text "arg : D"))
-                    | (c,a) <- Map.toList constructors]
+             [ text "denotes_" <> ppr c <> ppr (a+1) <> parens (hsep $ punctuate comma $ replicate (a+1) (text "arg : D"))
+                    | (c,aa) <- Map.toList constructors, a <- toList aa]
          dump_bddbddb $ unlines $ map show
-             [ ppr c <> parens (hsep $ punctuate comma $ replicate a (text "arg : D"))
+             [ ppr c <> ppr a <> parens (hsep $ punctuate comma $ replicate a (text "arg : D"))
                         <+>  text "outputtuples"
-                    | (c,a) <- predicates]
-         dump_bddbddb "notAny (arg : D) inputtuples"
+                    | (c,aa) <- predicates, a <- toList aa]
+         dump_bddbddb "notAny1 (arg : D) inputtuples"
          let domainDict = Map.fromList (dom `zip` [(0::Int)..])
 
-         withTempFile' (takeDirectory fp) "notAny.tuples" $ \notanyfp notanyh -> do
-         echo ("writing facts for notAny in file " ++ notanyfp )
+         withTempFile' (takeDirectory fp) "notAny1.tuples" $ \notanyfp notanyh -> do
+         echo ("writing facts for notAny1 in file " ++ notanyfp )
          hPutStrLn notanyh $ unlines (("# D0: " ++ show domsize) : [ show i | i <- [1..domsize - 1]])
          hClose notanyh
 
@@ -242,9 +242,9 @@ computeSuccessPatterns depth verbosity mb_goal_ pl fp bdd_paths = do
              mb_goal_c = foldFree return toId <$$$$> mb_goal
              toId (T f) | Just i <- Map.lookup f domainDict = term0 i
                         | otherwise = error ("Symbol not in domain: " ++ show (ppr f))
-         dump_bddbddb (show $ ppr den_cc)
-         dump_bddbddb (show $ ppr cc)
-         maybe (return ()) (dump_bddbddb . show . ppr) mb_goal_c
+         dump_bddbddb (show $ pprBddbddb den_cc)
+         dump_bddbddb (show $ pprBddbddb cc)
+         maybe (return ()) (dump_bddbddb . show . pprBddbddb) mb_goal_c
 
          -- Running bddbddb
          hClose hbddbddb
@@ -258,14 +258,15 @@ computeSuccessPatterns depth verbosity mb_goal_ pl fp bdd_paths = do
            ExitFailure{} -> error ("bddbddb failed with an error")
            ExitSuccess   -> do
             let domArray = listArray (0, domsize) dom
-            results <- forM predicates $ \(p,i) -> do
-                         echo ("Processing file " ++ show p ++ ".tuples")
-                         let fp_result = (takeDirectory fp </> show p <.> "tuples")
+            results <- forM predicates $ \(p,ii) -> liftM concat $ forM (toList ii) $ \i -> do
+                         echo ("Processing file " ++ show p ++ show i ++ ".tuples")
+                         let fp_result = (takeDirectory fp </> show p ++ show i <.> "tuples")
                          output <- readFile fp_result
                          evaluate (length output)
                          removeFile fp_result
+                         let tuples = map (map (uncurry wildOrInt) . zip [1..] . words) (drop 1 $ lines output)
                          return [ Pred p (map (either var' (term0 . (domArray!))) ii)
-                                  | ii <- map (map (uncurry wildOrInt) . zip [1..] . words) (drop 1 $ lines output)
+                                  | ii <- tuples
                                   , all (< domsize) [i | Right i <- ii]]
             return (dom, results)
 
@@ -278,6 +279,16 @@ computeSuccessPatterns depth verbosity mb_goal_ pl fp bdd_paths = do
           findBddJarFile (fp:fps) = do
             x <- doesFileExist fp
             if x then return fp else findBddJarFile fps
+
+class PprBddBddb a where pprBddbddb :: a -> Doc
+instance Ppr (Free f v) => PprBddBddb (Free f v)     where pprBddbddb = ppr
+instance PprBddBddb a => PprBddBddb (ClauseF  a) where
+    pprBddbddb (a :- []) = pprBddbddb a <> text "."
+    pprBddbddb (a :- aa) = pprBddbddb a <+> text ":-" <+> hcat (punctuate comma $ map pprBddbddb aa) <> text "."
+instance (Ppr id, Ppr a) => PprBddBddb (GoalF id a) where
+    pprBddbddb (Pred p args) = ppr (Pred (ppr p <> Ppr.int (length args)) args)
+    pprBddbddb p = ppr p
+instance PprBddBddb (ClauseF a) => PprBddBddb [ClauseF a] where pprBddbddb = vcat . map pprBddbddb
 
 -- ----------------------
 -- Abstract Compilation
@@ -361,12 +372,11 @@ abstractCompilePre' :: (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, idp :<: (Den
 abstractCompilePre' 0 pl = (dom, [], denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature1 pl
   dom = [any, static, notvar]
-  denoteRules = [Pred (denotes f) (args ++ [term0 notvar]) :- []
-                | (f, a) <- Map.toList constructors, a > 0
-                , args <- replicateM a [term0 any, term0 notvar]
-                ] ++
-                [ Pred (denotes f) (replicate (a+1) (term0 static)) :- []
-                | (f,a) <- Map.toList constructors
+  denoteRules = [Pred (denotes f) (map term0 args ++ [term0 res]) :- []
+                | (f, aa) <- Map.toList constructors
+                , a       <- toList aa
+                , args    <- replicateM a [any, notvar, static]
+                , let res = if all isStatic args then static else notvar
                 ]
   cc' = map ( introduceWildcards
             . runFresh (flattenDupVarsC isLeft)
@@ -380,14 +390,14 @@ abstractCompilePre' 0 pl = (dom, [], denoteRules, cc') where
 abstractCompilePre' 1 pl = (dom, notanyRules, denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature1 pl
   dom = any : static :
-        [ compound (reinject f) args | (f,i) <- Map.toList constructors
-                                     , i>0
+        [ compound (reinject f) args | (f,ii) <- Map.toList constructors
+                                     , i <- toList ii, i>0
                                      , args <- replicateM i [notvar, any]
                                      ]
   notanyRules = [Pred notAny [term0 d] :- [] | d <- tail dom]
 
   denoteRules = [Pred (denotes f) (args ++ [term0 res]) :- notany_vars
-                | (f, a) <- Map.toList constructors, a > 0
+                | (f, aa) <- Map.toList constructors, a <- toList aa, a > 0
                 , groundness <- [0..2^a - 1]
                 , let bits = reverse $ take a (reverse(dec2bin groundness) ++ repeat False)
                 , let args = zipWith (\isnotvar v -> if isnotvar then v else term0 any) bits vars
@@ -395,7 +405,7 @@ abstractCompilePre' 1 pl = (dom, notanyRules, denoteRules, cc') where
                 , let notany_vars = [Pred notAny [v] | (True,v) <- zip bits vars]
                 ] ++
                 [ Pred (denotes f) (replicate (a+1) (term0 static)) :- []
-                | (f,a) <- Map.toList constructors
+                | (f,aa) <- Map.toList constructors, a <- toList aa
                 ] {- ++
                 [ Pred (denotes f) (replicate a (term0 freeArg) ++ [term0 any]) :- []
                 | (f,a) <- Map.toList constructors, a > 0
@@ -476,7 +486,7 @@ tp_herbrand openTerm mkTerm p (I i) = mkI
     j c@(h :- cc) = [fmap2 (>>= var_mapping a) c | a <- assignments] where
       var_mapping ass v | Just d <- Map.lookup v ass = Impure $ mkTerm d
       assignments   = --assert (all (==0) (Map.elems functors))
-                      ((Map.fromList . zip fv) `map` replicateM (length fv) [f|(f,0) <- Map.toList functors]) -- Assuming all terms are arity 0
+                      ((Map.fromList . zip fv) `map` replicateM (length fv) [f|(f,aa) <- Map.toList functors, toList aa == [0] ]) -- Assuming all terms are arity 0
       fv             = snub $ foldMap2 toList (h:cc)
 
 -- | A clause assignments is computed from a preinterpretation.
@@ -522,8 +532,9 @@ buildPre (DeltaMany delta, sigma) = fixEq f
    where
     new_elems = [tracePpr (text "  inserted " <> ppr s <+> text "with f=" <> ppr f <+> text "and cc=" <> ppr cc)
                  (qd `mappend` Set.singleton s, Map.insert (f,cc) s delta_d)
-                  | (f,n)  <- Map.toList sigma
-                  ,  cc    <- replicateM n (Set.toList qd)
+                  | (f,nn)  <- Map.toList sigma
+                  , n <- toList nn
+                  , cc    <- replicateM n (Set.toList qd)
                   , let s = Set.fromList $ concat $ catMaybes
                             [Map.lookup (f, c) delta | c <- Prelude.sequence (map Set.toList cc)]
                   , not (Set.null s)
@@ -547,7 +558,7 @@ isStatic (match -> Just Static{}) = True ; isStatic _ = False
 --notvarAny0 :: (Ord (f'(Expr f')), Ord (f(Expr f)), f' :<: f, Any :<: f, NotVar :<: f) => MkPre f' f
 notvarAny0 sig = (toDeltaMany (mkDeltaAny sig) `mappend` toDeltaMany  deltaNotVar, sig) -- TODO Fix like in notVarAny1
  where
-  deltaNotVar= Map.fromList [ ((reinject f, replicate i notvar), notvar)| (f,i) <- Map.toList sig]
+  deltaNotVar= Map.fromList [ ((reinject f, replicate i notvar), notvar)| (f,ii) <- Map.toList sig, i <- toList ii]
 
 -- | Compound is a recursive constructor to analyze the
 --   instantiation level of a function symbol
@@ -567,28 +578,33 @@ freeArg = inject FreeArg; isFree (match -> Just FreeArg) = True; isFree _ = Fals
 
 notvarAny1 :: (Ord (Expr f), V :<: f, Ord (Expr f'), Compound :<: f',  Static :<: f', FreeArg :<: f', Any :<: f', NotVar :<: f', f :<: f') => MkPre f f'
 notvarAny1 sig = (
-                  toDeltaMany (mkDeltaAny sig') `mappend` 
+                  toDeltaMany (mkDeltaAny sig') `mappend`
                   toDeltaMany (Map.fromList delta), sig')
   where
-   sig'   = sig `mappend` Map.singleton mkV 0
+   sig'   = sig `mappend` Map.singleton mkV (Set.singleton 0)
    domain = static : [ compound (reinject f) args
-                            | (f,i) <- Map.toList sig, args <- replicateM i [freeArg,notvar], Prelude.any isFree args]
+                            | (f,ii) <- Map.toList sig
+                            , i <- toList ii
+                            , args <- replicateM i [freeArg,notvar]
+                            , Prelude.any isFree args]
    delta  =     ((mkV,[]), freeArg) :
                 [((f,args),  res)
-                | (f, a) <- Map.toList sig, a > 0
+                | (f, aa) <- Map.toList sig, a <- toList aa,  a > 0
                 , groundness <- [0..2^a - 1]
                 , let bits = reverse $ take a (reverse(dec2bin groundness) ++ repeat False)
                 , args <- Prelude.mapM (\isnotvar -> if isnotvar then domain else [freeArg]) bits
                 , let res  = compound (reinject f) ((notvar?:freeArg) <$> bits)
                 ] ++
                 [ ((f, replicate a static), static)
-                | (f,a) <- Map.toList sig
+                | (f,aa) <- Map.toList sig
+                , a      <- toList aa
                 ]
 
 cookPre :: (Compound :<: f, Any :<: f, NotVar :<: f, Ord (f(Expr f)), Ord (id(Expr id)), id :<: f) =>
                   Arity (Expr id) -> PreInterpretation id f
 cookPre sig = (Set.fromList domain, tran) where
-  domain = any : notvar : [ compound (reinject f) args | (f,i) <- Map.toList sig
+  domain = any : notvar : [ compound (reinject f) args | (f,ii) <- Map.toList sig
+                                                       , i      <- toList ii
                                                        , i>0
                                                        , args <- replicateM i [notvar, any]
                                                        , not (all isNotVar args) ]
@@ -596,8 +612,9 @@ cookPre sig = (Set.fromList domain, tran) where
 
   deltaAny = Map.empty -- Map.fromList [ ((f, replicate i any), any)| (f,i) <- Map.toList sig, i > 0]
   delta1 = [((f, args), typ)
-            | (f,i)  <- Map.toList sig
-            , args <- replicateM i domain
+            | (f,ii)  <- Map.toList sig
+            , i       <- toList ii
+            , args    <- replicateM i domain
             , let typ = case () of
                            _ | i == 0               -> notvar
                            _ | all (not.isAny) args -> notvar
@@ -609,8 +626,8 @@ mkDeltaMany = DeltaMany . Map.fromListWith (++)
 toDeltaMany :: (Ord id, Ord a) => Delta id a -> DeltaMany id a
 toDeltaMany = DeltaMany . Map.map (:[])
 
-mkDeltaAny :: (Ord id, Ord (Expr f), Any :<: f) => Map id Int -> Delta id (Expr f)
-mkDeltaAny sig = Map.fromList [ ((f, replicate i any), any)| (f,i) <- Map.toList sig]
+mkDeltaAny :: (Ord id, Ord (Expr f), Any :<: f) => Arity id -> Delta id (Expr f)
+mkDeltaAny sig = Map.fromList [ ((f, replicate i any), any)| (f,ii) <- Map.toList sig, i <- toList ii]
 
 anyOrElseNotVar m = if isAny m then any else notvar
 
@@ -712,5 +729,5 @@ pre_ex6  = buildPre (tran, sig) where
                      , ((mkT "nil",  [])               , [listlist])
                      , ((mkT "cons", [list, listlist]) , [listlist])
                      ]
-list_sig  = Map.fromList [(mkT "cons",2), (mkT "nil", 0)]
-peano_sig = Map.fromList [(mkT "s",1), (mkT "0", 0)]
+list_sig  = Map.fromList [(mkT "cons",Set.singleton 2), (mkT "nil", Set.singleton 0)]
+peano_sig = Map.fromList [(mkT "s", Set.singleton 1), (mkT "0", Set.singleton 0)]

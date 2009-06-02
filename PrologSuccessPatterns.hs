@@ -93,7 +93,8 @@ run_bddbddb Opts{..} = do
   echo "bddbddb produced the following success patterns:\n"
   print (vcat $ map ppr $ concat results)
   echo " \nWe can simplify the patterns as follows:\n"
-  let zipped_results = abstract (term0 <$> dom) <$> results
+--  let zipped_results = abstract (term0 <$> dom) <$> results
+  let zipped_results = abstractAnys any <$> results
   print (vcat $ map ppr $ concat zipped_results)
 
 -- ---------------

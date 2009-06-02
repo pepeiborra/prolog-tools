@@ -444,6 +444,17 @@ prepareTerm = foldFree (return . Right) f where
     f (Prolog.Cons h t) = term1 cons [h,t]
     f (Prolog.Nil) = term1 nil []
 
+-- ------------
+-- Abstraction
+-- ------------
+--abstractAnys
+
+abstractAnys theany cc = compress (Set.toList newcc) cc
+  where
+    cc'   = Set.fromList (runFresh (mapM2 (foldFreeM return2 replaceAnys)) cc)
+    newcc = cc' `Set.difference` Set.fromList cc
+    replaceAnys (T id) = if id == theany then return <$> freshVar else return (term0 id)
+
 -- ------------------
 -- Fixpoint operator
 -- ------------------

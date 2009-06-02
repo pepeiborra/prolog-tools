@@ -55,7 +55,7 @@ flattenC :: (Traversable f, Traversable t, MonadFresh v m) =>
               (Free f v -> v -> t (Free f v)) -> ClauseF (t (Free f v)) -> m(ClauseF (t (Free f v)))
 flattenC box clause@(h :- b) = do
     (h' :- b', goals) <- runWriterT (mapM2 flattenTerm clause)
-    return (h' :- (b' ++ goals))
+    return (h' :- (goals ++ b'))
   where
   flattenTerm  = evalFree return2 f
   f t = do

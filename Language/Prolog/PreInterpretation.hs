@@ -676,8 +676,6 @@ instance PprF PrologT where
     pprF Cons = text "cons"; pprF Nil = text "nil"
     pprF (String s) = quotes (text s)
 instance PprF Compound where pprF (Compound id dd) = ppr id <> parens (hcat $ punctuate comma $ map ppr dd)
-instance (PprF f, PprF g) => PprF (f :+: g) where
-  pprF (Inl l) = pprF l; pprF (Inr r) = pprF r
 
 
 instance Functor  (Term1F id) where fmap f (Term1 id tt) = Term1 id (map f tt)

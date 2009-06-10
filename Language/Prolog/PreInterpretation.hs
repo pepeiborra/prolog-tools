@@ -667,12 +667,8 @@ instance Functor PrologT where
     fmap _ Tup = Tup  ; fmap _ (String s) = String s
     fmap _ Cons = Cons; fmap _ Nil = Nil
 
-instance Ppr a => Ppr (Set a)            where ppr = braces   . hcat . punctuate comma . map ppr . Set.toList
-instance (Ppr k, Ppr a) => Ppr (Map k a) where ppr = vcat . map ppr . Map.toList
-instance (Ppr a, Ppr b) => Ppr (Either a b) where ppr = either ppr ppr
 instance PprF f => Ppr (Expr f) where ppr = foldExpr pprF
 instance PprF f =>Show (Expr f) where show = show . ppr
-instance Ppr Doc                where ppr = id
 
 -- | Any is the constructor for the distinguished domain object
 --   any, the bottom of the domain. Every object in the concrete

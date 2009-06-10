@@ -8,7 +8,8 @@ import Language.Prolog.Syntax as Prolog
 import Language.Prolog.Signature
 import Text.ParserCombinators.Parsec
 import Text.PrettyPrint (text)
-import TRS.Signature
+
+import Data.Term.Rules
 
 instance Error ParseError
 

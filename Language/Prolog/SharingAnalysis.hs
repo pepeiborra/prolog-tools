@@ -21,7 +21,7 @@ import Data.Map (Map)
 import Data.Term.Var
 
 import Language.Prolog.Signature ()
-import TRS.Signature
+import Data.Term.Rules
 
 import qualified Prelude as P
 import Prelude hiding (concatMap,mapM_)

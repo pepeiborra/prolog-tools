@@ -16,15 +16,8 @@ import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Term
+import Data.Term.Rules
 import Language.Prolog.Syntax
-import TRS.Signature
-
-instance (Show id, Ord id) => HasSignature (Program' id var) id where
-  getSignature cc = let aritiesP = Map.fromList [ (f, length tt) | Pred f tt   <- F.toList =<< cc]
-                        aritiesF = Map.fromList [ (f, length tt) | Pred _ args <- F.toList =<< cc, Impure(Term f tt) <- subterms =<< args ]
-                        functors = Map.keysSet aritiesF
-                        preds    = Map.keysSet aritiesP
-                        in Sig {constructorSymbols = functors, definedSymbols = preds, arity = aritiesP `mappend` aritiesF}
 
 data PrologSignature idp idt = PrologSig {constructorSymbols :: Map idt (Set Int), predicateSymbols :: Map idp (Set Int) } deriving (Eq,Show)
 

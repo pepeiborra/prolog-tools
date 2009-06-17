@@ -637,7 +637,7 @@ anyOrElseNotVar m = if isAny m then any else notvar
 deriving instance Ord (f(Expr f)) => Ord (Expr f)
 deriving instance (Ppr id, Ppr [da]) => Ppr (DeltaMany id da)
 
-runFresh m c  = m c `evalState` ([toEnum 1..] \\ getVars c)
+runFresh m c  = m c `evalState` ([toEnum 1..] \\ Set.toList (getVars c))
 
 
 withTempFile dir name m = bracket (openTempFile dir' name') (removeFile . fst) (uncurry m)

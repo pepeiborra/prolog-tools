@@ -92,8 +92,7 @@ main = do
 -}
 
 run_bddbddb Opts{..} = do
-  (dom, results) <- computeSuccessPatterns
-                    ComputeSuccessPatternsOpts{labelcalls,depth,verbosity,debug,fp=problemFile,bddbddb_path} goal pl
+  (dom, results) <- computeSuccessPatterns depth verbosity debug goal pl problemFile bddbddb_path
   echo "bddbddb produced the following success patterns:\n"
   print (vcat $ map ppr $ concat results)
   echo " \nWe can simplify the patterns as follows:\n"

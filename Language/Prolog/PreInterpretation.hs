@@ -188,16 +188,24 @@ getSuccessPatterns' mkDelta pl =
 -- ------------
 -- Driver
 -- ------------
+data ComputeSuccessPatternsOpts = ComputeSuccessPatternsOpts { depth     ::Int
+                                                             , verbosity ::Int
+                                                             , debug     ::Bool
+                                                             , fp        ::FilePath
+                                                             , bddbddb_path ::[FilePath]
+                                                             }
+
 computeSuccessPatterns :: forall idp t t' as.
                           (idp ~ (T String :+: QueryAnswer String), as ~ Abstract String, t ~ DatalogTerm (Expr as), t' ~ (Free (T (Expr as)) Var)) =>
-                          Int -> Int -> Bool -> Maybe (GoalF String t) -> Program'' String (Term' String Var) -> FilePath -> [FilePath] -> IO ([Expr as], [[GoalF (Expr idp) t']])
-computeSuccessPatterns depth verbosity debug mb_goal_ pl fp bdd_paths = do
-         bddbddb_jar <- findBddJarFile bdd_paths
+                          ComputeSuccessPatternsOpts -> Maybe (GoalF String t) -> Program'' String (Term' String Var) -> IO ([Expr as], [[GoalF (Expr idp) t']])
+computeSuccessPatterns ComputeSuccessPatternsOpts{..} mb_goal_ pl = do
+         bddbddb_jar <- findBddJarFile bddbddb_path
          let mb_goal = (fmap (introduceWildcards . runFresh (flattenDupVarsC isLeft)) . queryAnswerGoal)
                          <$> mb_goal_ :: Maybe (AbstractDatalogProgram idp (Expr as))
              pl' :: Program'' (Expr idp) (TermC String)
-             pl' = if isJust mb_goal then queryAnswer (prepareProgram pl)
-                                     else mapPredId mkT <$$> prepareProgram pl
+             pl' = case mb_goal of
+                       Just _              -> queryAnswer (prepareProgram pl)
+                       Nothing             -> mapPredId mkT <$$> prepareProgram pl
              PrologSig constructors predicates0 = getPrologSignature1 pl'
              (dom, _, denotes, clauses) = abstractCompilePre' depth pl'
              predicates = nub $

@@ -18,7 +18,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.AlaCarte.Ppr
 import Data.Foldable (Foldable, foldMap, toList)
-import Data.List (nubBy, foldl', groupBy, sort, sortBy, elemIndex)
+import Data.List (nubBy, foldl', groupBy, sort, sortBy, elemIndex, (\\))
 import Data.Monoid
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -92,7 +92,25 @@ instance Ppr id => PprF (QueryAnswer id) where
     pprF (QueryAll id)  = text "query_" <> ppr id
     pprF (Query id i j) = text "query_" <> Ppr.int i <> text "_" <> Ppr.int j <> text "_" <> ppr id
 
-queryAnswer :: (Enum var, Monad mt, QueryAnswer idp :<: idp', term ~ mt var) =>
+{-  Example.
+ Original program:
+ p([x|y]) :- q(x), r(y).
+ q(a).
+ q(b).
+ r(a).
+
+ Result:
+ answer_r(a) <- call_r(a).
+ answer_q(a) <- call_q(a).
+ answer_q(b) <- call_q(b).
+ answer_p(x) <- call_p(x), answer_q(x), answer_r(x).
+ call_1_1_q(x) <- call_p([x|_]).
+ call_q(x)     <- call_1_1_q(x).
+ call_1_2_r(y) <- call_p([_|y]), answer_q(x).
+ call_r(y)     <- call_1_2_r(y).
+-}
+
+queryAnswer :: (Enum var, Eq var, Functor termF, QueryAnswer idp :<: idp', term ~ Free termF var) =>
                    Program'' idp term -> Program'' (Expr idp') term
 queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
  where
@@ -101,21 +119,33 @@ queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
                                 [ Pred (answer c) c_args | Pred c c_args <- cc ])
   queryF _ (_ :- []) = []
   queryF i (Pred h h_args :- cc@(Pred b0 b0_args :_)) =
-      Pred (query b0 i 1) b0_args :- [Pred (queryAll h) h_args] :
-      queryAllquery b0 (length b0_args) i 1 :
-     concat
-     [[Pred (query bj i j) bj_args :- ([Pred (answer c) c_args | Pred c c_args <- bleft] ++
-                                       [Pred (queryAll h) h_args])
-      ,queryAllquery bj (length bj_args) i j]
-     | (j,(bleft, Pred bj bj_args :_)) <- zip [2..] (map (`splitAt` cc)  [1..length cc - 1])]
 
-queryAllquery h ar i j = let vars = take ar allvars in Pred (queryAll h) vars :- [Pred (query h i j) vars]
+      -- call_i_1_q(x) :- call_p([x|_]).
+      Pred (query b0 i 1) b0_args :- [querySome h h_args] :
+
+      -- call_q(x) :- call_i_1_q(x).
+      queryAllquery b0 (length b0_args) 0 i 1           :
+
+     concat
+     [[-- call_i_j_r(y) :- call_p([x|_]), answer...
+        Pred (query bj i j)  bj_args :- ([Pred (answer c) c_args | Pred c c_args <- bleft] ++
+                                       [querySome h h_args])
+       -- call_r(y) :- call_i_j_r(y).
+      , queryAllquery bj (length bj_args) 0 i j]
+         | (j,(bleft, Pred bj bj_args :_)) <- zip [2..] (map (`splitAt` cc)  [1..length cc - 1])]
+     concat
+         | (j,(bleft, Pred bj bj_args :_)) <- zip [2..] (map (`splitAt` cc)  [1..length cc - 1])]
+
+querySome p args = Pred (queryAll p) args
+queryAllquery h ar1 ar2 i j = Pred (queryAll h) vars2 :- [Pred (query h i j) vars1]
   where allvars = map (return . toEnum)  [1..]
+        vars1 = take (ar1 + ar2) allvars
+        vars2 = take ar1 $ drop ar2 allvars
 
 queryAnswerGoal :: (Enum var, Monad mt, QueryAnswer idp :<: idp', term ~ mt var) =>
                    GoalF idp term -> Program'' (Expr idp') term
 
-queryAnswerGoal  (Pred g g_args)  = [Pred (query g 0 1) g_args :- [], queryAllquery g (length g_args) 0 1]
+queryAnswerGoal  (Pred g g_args)  = [Pred (query g 0 1) g_args :- [], queryAllquery g (length g_args) 0 0 1]
 
 
 -- --------------------

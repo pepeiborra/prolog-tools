@@ -1,3 +1,5 @@
+{-# LANGUAGE ViewPatterns #-}
+
 import Control.Applicative hiding ((<|>), many)
 import Control.Monad.Error
 import Data.List
@@ -6,6 +8,7 @@ import qualified Data.Set as Set
 import Language.Prolog.Parser as Prolog (program, query, clause, whiteSpace)
 import Language.Prolog.Syntax as Prolog
 import Language.Prolog.Signature
+import System.Environment
 import Text.ParserCombinators.Parsec
 import Text.PrettyPrint (text)
 
@@ -13,13 +16,17 @@ import Data.Term.Rules
 
 instance Error ParseError
 
-main = interact ( either error (\(pgm, goal) -> show(ppr pgm) ++
-                                               "\n%query: " ++ show (ppr goal) ++ "\n")
-                . translate)
+main = do
+   [fp]     <- getArgs
+   contents <- readFile fp
+   case translate fp contents of
+     Left err -> error err
+     Right (pgm, goal) -> putStrLn (show(ppr pgm) ++
+                                    "\n%query: " ++ show (ppr goal) ++ "\n")
 
-translate :: String -> Either String (Program String, TermF String Mode)
-translate txt = do
-  things <- mapLeft show $ parse problemP "" txt
+translate :: FilePath -> String -> Either String (Program String, TermF String Mode)
+translate fp txt = do
+  things <- mapLeft show $ parse problemP fp txt
   let pgm      = [c | Clause c <- things]
       qq_txt   = [q | QueryString q <- things]
   queries1 <- mapLeft show $ mapM goalToGoal (concat [q | Query q <- things])
@@ -35,8 +42,8 @@ translate txt = do
                 trueT         = term trueF []
                 tupleT x y    = term "" [x,y]
                 (x,y)         = (var "X", var "Y")
-                transformClause (h :- [])   = clauseP (transformPred h) trueT               :- []
-                transformClause (h :- cc)   = clauseP (transformPred h) (transformPreds cc) :- []
+                transformClause (h :- (filter (not.isCut) -> [])) = clauseP (transformPred h) trueT :- []
+                transformClause (h :- (filter (not.isCut) -> cc)) = clauseP (transformPred h) (transformPreds cc) :- []
                 transformPred   (Pred f tt) = term f tt
                 transformPred   (Is f g)    = term equalsF [f, g]
                 transformPred   (f :=: g)   = term equalsF [f, g]
@@ -79,13 +86,14 @@ data PrologSection = Query [Goal String] | Clause (Clause String) | QueryString 
 problemP = do
   txt <- getInput
   let !queryComments = map QueryString $ catMaybes $ map findQuery (lines txt)
-  res <- Prolog.whiteSpace >> many (Clause <$> Prolog.clause <|> Query <$> Prolog.query)
-  return (res ++ queryComments)
+  res <- Prolog.whiteSpace >> many (Clause <$$> Prolog.clause <|> Query <$$> Prolog.query)
+  return (concat res ++ queryComments)
   where findQuery ('%'    :'q':'u':'e':'r':'y':':':' ':goal) = Just $ goal
         findQuery ('%':' ':'q':'u':'e':'r':'y':':':' ':goal) = Just $ goal
         findQuery ('%'    :'q':'u':'e':'r':'y':':':goal) = Just $ goal
         findQuery ('%':' ':'q':'u':'e':'r':'y':':':goal) = Just $ goal
         findQuery _ = Nothing
+        (<$$>) = fmap . fmap
 
 mapLeft :: (l -> l') -> Either l r -> Either l' r
 mapLeft f (Left x)  = Left(f x)

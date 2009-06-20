@@ -1,11 +1,14 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeOperators, ScopedTypeVariables #-}
-{-# LANGUAGE NamedFieldPuns, RecordWildCards #-}
+{-# LANGUAGE NamedFieldPuns, RecordWildCards, DisambiguateRecordFields #-}
 {-# LANGUAGE CPP #-}
 
 #ifdef GHCI
-module PrologSuccessPatterns where
+#define THIS PrologSuccessPatterns
+module THIS where
+#else
+#define THIS Main
 #endif
 
 --import Control.Monad.Exception
@@ -89,7 +92,8 @@ main = do
 -}
 
 run_bddbddb Opts{..} = do
-  (dom, results) <- computeSuccessPatterns depth verbosity debug goal pl problemFile bddbddb_path
+  (dom, results) <- computeSuccessPatterns
+                    ComputeSuccessPatternsOpts{labelcalls,depth,verbosity,debug,fp=problemFile,bddbddb_path} goal pl
   echo "bddbddb produced the following success patterns:\n"
   print (vcat $ map ppr $ concat results)
   echo " \nWe can simplify the patterns as follows:\n"
@@ -107,7 +111,7 @@ data PrologSection = QueryProgram [Goal String] | Clause (Prolog.Clause String) 
 problemParser = do
   txt <- Parsec.getInput
   let !queryComments = map QueryString $ catMaybes $ map f (lines txt)
-  res <- PrologP.whiteSpace >> many (Clause <$> PrologP.clause <|> QueryProgram <$> PrologP.query)
+  res <- PrologP.whiteSpace >> concat <$> many (Clause <$$> PrologP.clause <|> QueryProgram <$$> PrologP.query)
   return (res ++ queryComments)
   where f ('%'    :'q':'u':'e':'r':'y':':':goal) = Just goal
         f ('%':' ':'q':'u':'e':'r':'y':':':goal) = Just goal
@@ -139,6 +143,7 @@ data Opts = Opts  { classpath :: [String]
                   , bddbddb_path :: [String]
                   , goal      :: Maybe (GoalF String (DatalogTerm (Expr (Abstract String))))
                   , depth     :: Int
+                  , labelcalls:: Bool
                   , nogoals   :: Bool
                   , mode      :: Mode
                   , problemFile :: String
@@ -154,7 +159,8 @@ defOpts = Opts { classpath = []
                , nogoals = False
                , verbosity = 1
                , debug = False
-               , depth = 1}
+               , depth = 1
+               , labelcalls = False}
 
 data Mode = Bddbddb | Fixpoint
 
@@ -178,20 +184,22 @@ getOptions = do
 
 opts = [ Option "" ["bddbddb"]         (ReqArg setBddbddb "PATH") "Path to the bddbddb jar file"
        , Option "d" ["depth"]          (ReqArg setDepth "0-1") "Depth of the approximation (default: 1)"
+       , Option "l" ["label-calls"] (NoArg $ \o -> return o{THIS.labelcalls=True})
+                                                              "Include mode information of the head goal in the clause"
        , Option "" ["cp","classpath"]  (ReqArg setCP "PATHS")     "Additional classpath for the Java VM"
        , Option "b" [] (NoArg (\opts -> return opts{mode=Bddbddb}))  "Use bddbddb to compute the approximation (DEFAULT)"
        , Option "f" [] (NoArg (\opts -> return opts{mode=Fixpoint})) "Solve the fixpoint equation to compute the approximation (slower)"
        , Option "" ["nogoals","bottomup"] (NoArg setNogoals)     "Ignore any goals and force a bottom-up analysis"
        , Option "v" ["verbose"] (OptArg setVB "0-2") "Set verbosity level (default: 1)"
-       , Option ""  ["debug"] (NoArg (\opts -> return opts{debug=True})) "Do not delete intermediate files"
+       , Option ""  ["debug"] (NoArg (\opts -> return opts{THIS.debug=True})) "Do not delete intermediate files"
        , Option "h?" ["help"] (NoArg $ \_ -> putStrLn (usageInfo usage opts) >> exitSuccess) "Displays this help screen"
        ]
 
 setCP arg opts = return opts{classpath = splitBy (== ':') arg}
-setBddbddb arg opts = return opts{bddbddb_path = [arg]}
+setBddbddb arg opts = return opts{THIS.bddbddb_path = [arg]}
 setNogoals opts = return opts{nogoals = True}
-setVB arg opts = return opts{verbosity = maybe 1 read arg}
-setDepth arg opts = return opts{depth = min 1 (max 0 (read arg))}
+setVB arg opts = return opts{THIS.verbosity = maybe 1 read arg}
+setDepth arg opts = return opts{THIS.depth = min 1 (max 0 (read arg))}
 
 splitBy :: (a->Bool) -> [a] -> [[a]]
 splitBy _ [] = []

@@ -133,8 +133,6 @@ queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
        -- call_r(y) :- call_i_j_r(y).
       , queryAllquery bj (length bj_args) 0 i j]
          | (j,(bleft, Pred bj bj_args :_)) <- zip [2..] (map (`splitAt` cc)  [1..length cc - 1])]
-     concat
-         | (j,(bleft, Pred bj bj_args :_)) <- zip [2..] (map (`splitAt` cc)  [1..length cc - 1])]
 
 querySome p args = Pred (queryAll p) args
 queryAllquery h ar1 ar2 i j = Pred (queryAll h) vars2 :- [Pred (query h i j) vars1]

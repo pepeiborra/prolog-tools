@@ -6,10 +6,11 @@
 
 #ifdef GHCI
 #define THIS PrologSuccessPatterns
-module THIS where
 #else
 #define THIS Main
 #endif
+
+module THIS where
 
 --import Control.Monad.Exception
 import Control.Applicative
@@ -92,7 +93,8 @@ main = do
 -}
 
 run_bddbddb Opts{..} = do
-  (dom, results) <- computeSuccessPatterns depth verbosity debug goal pl problemFile bddbddb_path
+  (dom, results) <- computeSuccessPatterns
+                    ComputeSuccessPatternsOpts{depth,verbosity,debug,fp=problemFile,bddbddb_path} goal pl
   echo "bddbddb produced the following success patterns:\n"
   print (vcat $ map ppr $ concat results)
   echo " \nWe can simplify the patterns as follows:\n"
@@ -186,15 +188,15 @@ opts = [ Option "" ["bddbddb"]         (ReqArg setBddbddb "PATH") "Path to the b
        , Option "f" [] (NoArg (\opts -> return opts{mode=Fixpoint})) "Solve the fixpoint equation to compute the approximation (slower)"
        , Option "" ["nogoals","bottomup"] (NoArg setNogoals)     "Ignore any goals and force a bottom-up analysis"
        , Option "v" ["verbose"] (OptArg setVB "0-2") "Set verbosity level (default: 1)"
-       , Option ""  ["debug"] (NoArg (\opts -> return opts{debug=True})) "Do not delete intermediate files"
+       , Option ""  ["debug"] (NoArg (\opts -> return opts{THIS.debug=True})) "Do not delete intermediate files"
        , Option "h?" ["help"] (NoArg $ \_ -> putStrLn (usageInfo usage opts) >> exitSuccess) "Displays this help screen"
        ]
 
 setCP arg opts = return opts{classpath = splitBy (== ':') arg}
-setBddbddb arg opts = return opts{bddbddb_path = [arg]}
+setBddbddb arg opts = return opts{THIS.bddbddb_path = [arg]}
 setNogoals opts = return opts{nogoals = True}
-setVB arg opts = return opts{verbosity = maybe 1 read arg}
-setDepth arg opts = return opts{depth = min 1 (max 0 (read arg))}
+setVB arg opts = return opts{THIS.verbosity = maybe 1 read arg}
+setDepth arg opts = return opts{THIS.depth = min 1 (max 0 (read arg))}
 
 splitBy :: (a->Bool) -> [a] -> [[a]]
 splitBy _ [] = []

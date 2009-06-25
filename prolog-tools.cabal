@@ -18,6 +18,7 @@ Library
      Language.Prolog.Signature
      Language.Prolog.SharingAnalysis
 --     Language.Prolog.ModeAnalysis
+     Language.Prolog.Representation
      Language.Prolog.PreInterpretation
      Language.Prolog.Transformations
   other-modules:

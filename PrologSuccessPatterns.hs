@@ -25,6 +25,7 @@ import Data.Maybe
 import Data.AlaCarte
 import Data.Monoid hiding (Any)
 import Data.Term (MonadFresh(..))
+import Data.Term.Rules
 import Data.Term.Var
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -32,6 +33,7 @@ import qualified Data.Set as Set
 import Language.Prolog.Parser as Prolog (program)
 import qualified Language.Prolog.Parser as PrologP
 import Language.Prolog.PreInterpretation
+import Language.Prolog.Representation
 import Language.Prolog.Semantics (eval)
 import Language.Prolog.Signature
 import Language.Prolog.Syntax as Prolog
@@ -63,13 +65,17 @@ bddbddb_jar_paths = ["bddbddb-full.jar", "bddbddb.jar"]
 
 main = do
   (opts@Opts{..}, nonOpts) <- getOptions
-  let mkPre :: MkPre Concrete (FreeArg :+: Abstract String) = notvarAny1
   case mode of
     Bddbddb -> run_bddbddb opts
+{-
     Fixpoint -> do
          echo "We obtain the success patterns:"
-         print (getSuccessPatterns mkPre pl) -- :: Interpretation (Expr (T String)) (ObjectSet Abstract))
-
+         let mkPre :: MkPre Concrete (FreeArg :+: Abstract String) = notvarAny1
+             sig_pl = getSignature pl'
+             pl'    = queryAnswer $ prepareProgram pl
+             mkPre  = notvarAny1 sig_pl
+         getSuccessPatterns' pl'
+-}
 {-
     ["dfta"] -> do
          let ((dom,_), pl0) = getAbstractComp mkPre pl
@@ -94,7 +100,8 @@ main = do
 
 run_bddbddb Opts{..} = do
   (dom, results) <- computeSuccessPatterns
-                    ComputeSuccessPatternsOpts{depth,verbosity,debug,fp=problemFile,bddbddb_path} goal pl
+                    ComputeSuccessPatternsOpts{depth, verbosity, debug, fp = problemFile
+                                              ,bddbddb_path, mb_goal, pl}
   echo "bddbddb produced the following success patterns:\n"
   print (vcat $ map ppr $ concat results)
   echo " \nWe can simplify the patterns as follows:\n"
@@ -142,7 +149,7 @@ usage = "PrologSuccessPatterns - Computation of abstract success patterns using 
 
 data Opts = Opts  { classpath :: [String]
                   , bddbddb_path :: [String]
-                  , goal      :: Maybe (GoalF String (DatalogTerm (Expr (Abstract String))))
+                  , mb_goal   :: Maybe (GoalF String (DatalogTerm (Expr (Abstract String))))
                   , depth     :: Int
                   , nogoals   :: Bool
                   , mode      :: Mode
@@ -154,7 +161,7 @@ data Opts = Opts  { classpath :: [String]
 
 defOpts = Opts { classpath = []
                , bddbddb_path = bddbddb_jar_paths
-               , goal=Nothing
+               , mb_goal=Nothing
                , mode = Bddbddb
                , nogoals = False
                , verbosity = 1
@@ -172,13 +179,13 @@ getOptions = do
       opts@Opts{nogoals} <- foldl (>>=) (return defOpts) actions
       input <- maybe getContents readFile (listToMaybe nonOptions)
       let problemFile = fromMaybe "INPUT" (listToMaybe nonOptions)
-          (goals, pl) = parsePrologProblem problemFile input
-          goal        = if nogoals
+          (goals, the_pl) = parsePrologProblem problemFile input
+          the_goal = if nogoals
                           then Nothing
                           else  fmap (either (error.show) id . runParser goalParser 0 "goal")
                                      (listToMaybe (drop 1 nonOptions))
                                 `mplus` listToMaybe goals
-      return (opts{problemFile,pl,goal}, nonOptions)
+      return (opts{problemFile,THIS.pl=the_pl,THIS.mb_goal=the_goal}, nonOptions)
 
 
 opts = [ Option "" ["bddbddb"]         (ReqArg setBddbddb "PATH") "Path to the bddbddb jar file"

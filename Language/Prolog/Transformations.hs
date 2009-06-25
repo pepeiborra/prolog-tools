@@ -24,12 +24,14 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Traversable as T
 import Data.Traversable (Traversable, sequenceA)
+import Text.PrettyPrint as Ppr
+
 import Language.Prolog.Syntax
+import Language.Prolog.Representation
+import Language.Prolog.Utils
 import Data.Term
 import Data.Term.Rules
 import Data.Term.Var
-import Language.Prolog.Utils
-import Text.PrettyPrint as Ppr
 
 -- | Linealize duplicate vars using equality atoms
 flattenDupVarsC :: (Traversable t, Monad t, Ord var, MonadFresh var m) => (var -> Bool) -> Clause'' id (t var) -> m(Clause'' id (t var))
@@ -50,7 +52,8 @@ flattenDupVarsC isOk c = do
           tell [return v :=: res]
           return res
 
--- | The standard flattening transformation
+-- | The standard flattening transformation (see e.g. Bosco & Giovanetti 'Narrowing vs SLD Resolution')
+--   Receives a clause and a scheme to flatten compound terms, and outputs the flattened clause
 flattenC :: (Traversable f, Traversable t, MonadFresh v m) =>
               (Free f v -> v -> t (Free f v)) -> ClauseF (t (Free f v)) -> m(ClauseF (t (Free f v)))
 flattenC box clause@(h :- b) = do
@@ -63,10 +66,6 @@ flattenC box clause@(h :- b) = do
     t' <- T.mapM flattenTerm t
     tell [box (Impure t') v]
     return2 v
-
-data WildCard = WildCard deriving (Enum, Eq, Ord, Bounded)
-wildCard = return (Left WildCard)
-instance Ppr WildCard           where ppr _ = text "_"
 
 -- | Replace unused vars by wildcards
 introduceWildcards :: (Ord var, Foldable f, Functor f, t ~ Free f (Either WildCard var)) =>

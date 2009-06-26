@@ -129,9 +129,9 @@ computeSuccessPatternsOpts = ComputeSuccessPatternsOpts { mb_goal = Nothing
                                                         }
 
 computeSuccessPatterns :: forall idp t t' as.
-                          (idp ~ (T String :+: QueryAnswer String),
-                           PrologTerm String :<: as, NotVar :<: as, Any :<: as, Static :<: as, Compound :<: as, PprF as, Ord (Expr as),
-                           t' ~ (Free (T (Expr as)) Var)) =>
+                          (idp ~ (T String :+: QueryAnswer String), PprF as, Ord (Expr as),
+                           PrologTerm String :<: as, NotVar :<: as, Any :<: as, Compound :<: as,
+                           t' ~ Term0 (Expr as) Var) =>
                           ComputeSuccessPatternsOpts as -> IO ([Expr as], [[GoalF (Expr idp) t']])
 computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
          bddbddb_jar <- findBddJarFile bddbddb_path

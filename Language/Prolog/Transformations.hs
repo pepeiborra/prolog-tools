@@ -1,9 +1,6 @@
-{-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE Rank2Types #-}
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -81,7 +78,13 @@ introduceWildcards c = fmap2 (>>=f) c where
 -- Described in the paper "A bottom-up analysis toolkit"
 
 data QueryAnswer idp a = QueryAll idp | Query idp Int Int | Answer idp deriving (Eq,Ord,Show)
-answer = inject . Answer; queryAll = inject . QueryAll ; query id i j = inject (Query id i j)
+
+answer, queryAll :: (QueryAnswer idp :<: f) => idp -> Expr f
+query :: (QueryAnswer idp :<: f) => idp -> Int -> Int -> Expr f
+
+answer       = inject . Answer;
+queryAll     = inject . QueryAll
+query id i j = inject (Query id i j)
 instance Functor (QueryAnswer id) where
     fmap _ (Answer id)    = Answer id
     fmap _ (QueryAll id)  = QueryAll id
@@ -109,8 +112,8 @@ instance Ppr id => PprF (QueryAnswer id) where
  call_r(y)     <- call_1_2_r(y).
 -}
 
-queryAnswer :: (Enum var, Eq var, Functor termF, QueryAnswer idp :<: idp', term ~ Free termF var) =>
-                   Program'' idp term -> Program'' (Expr idp') term
+--queryAnswer :: (Enum var, Eq var, Functor termF, QueryAnswer idp :<: idp', term ~ Free termF var) =>
+  --                 Program'' idp term -> Program'' (Expr idp') term
 queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
  where
   answerF (Pred h h_args :- cc) =
@@ -142,7 +145,8 @@ queryAllquery h ar1 ar2 i j = Pred (queryAll h) vars2 :- [Pred (query h i j) var
 queryAnswerGoal :: (Enum var, Monad mt, QueryAnswer idp :<: idp', term ~ mt var) =>
                    GoalF idp term -> Program'' (Expr idp') term
 
-queryAnswerGoal  (Pred g g_args)  = [Pred (query g 0 1) g_args :- [], queryAllquery g (length g_args) 0 0 1]
+queryAnswerGoal  (Pred g g_args)  = [ Pred (query g 0 1) g_args :- []
+                                    , queryAllquery g (length g_args) 0 0 1]
 
 
 -- --------------------
@@ -190,6 +194,7 @@ compress patterns cc = zipIt [] (patterns ++ cc)
 -- Additional instances
 -- -------------------------
 -- Enum instance for Either
+
 instance (Enum a, Bounded a, Enum b, Bounded b) => Enum (Either a b) where
   toEnum i
       | i > minB * 2 = if minB == ma then Right (toEnum (i - minB))

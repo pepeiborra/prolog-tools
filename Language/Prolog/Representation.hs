@@ -1,9 +1,7 @@
-{-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
 {-# OPTIONS_GHC -fno-warn-overlapping-patterns #-}
 
 module Language.Prolog.Representation where
@@ -50,21 +48,23 @@ representTerm :: (Monad m, PrologT :<: f, T idt :<: f) =>
                -> m a                   -- ^ How to fill a 'Prolog.Wildcard'
                -> Prolog.TermF idt a
                -> m a
+
 representTerm term wildCard = f where
-    f (Prolog.Int i)      = return $ iterate psucc zero !! fromInteger i
+    f (Prolog.Int i)      = return $ iterate tsucc tzero !! fromInteger i
     f (Prolog.Tuple tt)   = return $ term tup tt
-    f (Prolog.Term id tt) = return $ term (mkT id) tt
+--    f (Prolog.Term id tt) = return $ term (mkT id) tt
     f (Prolog.String s)   = return $ term (string s) []
     f  Prolog.Wildcard    = wildCard
     f (Prolog.Cons h t)   = return $ term cons [h,t]
     f (Prolog.Nil)        = return $ term nil []
-    psucc x = term (inject (K Succ)) [x] ; zero = term (inject (K Zero)) []
+    tsucc x = term psucc [x] ; tzero = term zero []
 
 -- -------------------------
 -- * Wildcards for variables
 -- -------------------------
 
 data WildCard = WildCard deriving (Enum, Eq, Ord, Bounded)
+wildCard :: Monad m => m(Either WildCard var)
 wildCard = return (Left WildCard)
 instance Ppr WildCard           where ppr _ = text "_"
 
@@ -76,12 +76,13 @@ data T id a   = T id deriving (Show, Eq, Ord)
 type Term0 id = Free (T id)
 term0 = Impure . T
 
-mkT   = inject . T
+mkT :: (T id :<: f) => id -> Expr f
+mkT = inject . T
 isT (match -> Just (T{})) = True; isT _ = False
 
-instance Functor     (T id) where fmap    f (T id)   = T id
-instance Foldable    (T id) where foldMap _ _        = mempty
-instance Traversable (T id) where traverse _ (T id)  = pure (T id)
+instance Functor     (T id) where fmap      f (T id) = T id
+instance Foldable    (T id) where foldMap   _ _      = mempty
+instance Traversable (T id) where traverse  _ (T id) = pure (T id)
 instance Bifunctor    T     where bimap fid _ (T id) = T (fid id)
 
 instance Ppr id => Ppr  (T id a) where ppr  (T id) = ppr id
@@ -104,10 +105,13 @@ type PrologT = K PrologT_
 data PrologT_ = Zero | Succ | Tup | Cons | Nil | String String
                 deriving (Show, Eq, Ord)
 
+tup, cons, nil, psucc, zero :: (PrologT :<: f) => Expr f
+string :: (PrologT :<: f) => String -> Expr f
+
 tup     = inject (K Tup)
 cons    = inject (K Cons); nil = inject (K Nil)
 string  = inject . K . String
-psucc x = inject (K Succ)
+psucc   = inject (K Succ)
 zero    = inject (K Zero)
 
 instance Ppr PrologT_ where
@@ -119,6 +123,7 @@ instance Ppr PrologT_ where
 type PrologP  = K PrologP_
 data PrologP_ = Is | Eq deriving (Eq,Ord,Show)
 
+is,eq :: (PrologP :<: f) => Expr f
 is = inject (K Is)
 eq = inject (K Eq)
 
@@ -154,6 +159,13 @@ data Compound f = Compound f [f] deriving (Show, Eq, Ord)
 
 data FreeArg a = FreeArg deriving (Eq,Ord,Show)
 
+any      :: (Any :<: f) => Expr f
+notvar   :: (NotVar :<: f) => Expr f
+static   :: (Static :<: f) => Expr f
+freeArg  :: (FreeArg :<: f) => Expr f
+mkV      :: (V :<: f)      => Expr f
+compound :: (Compound :<: f) => Expr f -> [Expr f] -> Expr f
+
 any         = inject Any
 notvar      = inject NotVar
 static      = inject Static
@@ -163,7 +175,7 @@ mkV         = inject V
 
 isV      (match -> Just V)        = True ; isV _ = False
 isAny    (match -> Just Any)      = True ; isAny _    = False
-isNotVar (match -> Just NotVar{}) = True ; isNotVar _ = False
+isNotvar (match -> Just NotVar{}) = True ; isNotvar _ = False
 isStatic (match -> Just Static{}) = True ; isStatic _ = False
 
 
@@ -201,6 +213,10 @@ instance PprF FreeArg     where pprF _ = text "free"
 data Denotes idt a = Denotes idt deriving (Eq, Show, Ord)
 data NotAny      a = NotAny      deriving (Eq, Show, Ord)
 data Domain      a = Domain      deriving (Eq, Show, Ord)
+
+domain  :: (Domain :<: f) => Expr f
+notAny  :: (NotAny :<: f) => Expr f
+denotes :: (Denotes idt :<: f) => idt -> Expr f
 
 denotes = inject . Denotes
 domain  = inject Domain

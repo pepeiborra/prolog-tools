@@ -239,36 +239,24 @@ instance PprBddBddb (ClauseF a) => PprBddBddb [ClauseF a] where pprBddbddb = vca
 -- Abstract Compilation
 -- ----------------------
 
-
-vars' t = [ v | v@Right{} <- toList t]
-
-type AbstractCompile idt = DenotesT idt :+: Domain :+: NotAny
-
-data AbstractCompileOpts id d termd = AbstractCompile { id2domain   :: id -> d
-                                                      , domain2Term :: d -> termd
-                                                      , mkDomain    :: Bool
-                                                      }
-
-type Abstract idt = Any :+: NotVar :+: Static :+: Compound :+: PrologTerm idt
-
 abstractCompileProgram :: (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, idp :<: (DenotesT idt :+: idp),
                          var    ~ Either WildCard Var,
                          pgmany ~ AbstractDatalogProgram  NotAny d,
                          pgmden ~ AbstractDatalogProgram (NotAny :+: DenotesT idt) d,
                          pgm    ~ AbstractDatalogProgram (DenotesT idt :+: idp) d,
-                         d ~ (Expr fd), PrologTerm idt :<: fd, Any :<: fd, NotVar :<: fd, Static :<: fd, Compound :<: fd) =>
+                         d ~ (Expr fd), PrologTerm idt :<: fd, Any :<: fd, NotVar :<: fd, Compound :<: fd) =>
                          Int                                -- ^ Depth of the Preinterpretation used
                       ->  Program'' (Expr idp) (TermR idt)  -- ^ Original Program
                       -> ([d], pgmany, pgmden,pgm)          -- ^ (domain, notAny, denotes, program)
 
 abstractCompileProgram  0 pl = (dom, [], denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature pl
-  dom         = [any, static, notvar]
+  dom         = [any, notvar]
   denoteRules = [Pred (denotes f) (map term0 args ++ [term0 res]) :- []
                 | (f, aa) <- Map.toList constructors
                 , a       <- toList aa
-                , args    <- replicateM a [any, notvar, static]
-                , let res = if all isStatic args then static else notvar
+                , args    <- replicateM a [any, notvar]
+                , let res = notvar --if all isStatic args then static else notvar
                 ]
   cc' = map ( introduceWildcards
             . runFresh (flattenDupVarsC isLeft)
@@ -278,8 +266,7 @@ abstractCompileProgram  0 pl = (dom, [], denoteRules, cc') where
 
 abstractCompileProgram 1 pl = (dom, notanyRules, denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature pl
-  dom = any : static :
-        [ compound (reinject f) args | (f,ii) <- Map.toList constructors
+  dom = any : notvar : [ compound (reinject f) args | (f,ii) <- Map.toList constructors
                                      , i <- toList ii, i>0
                                      , args <- init $ tail $ -- we drop [a,a,a...] and [nv,nv,nv..]
                                                replicateM i [notvar, any]
@@ -294,7 +281,7 @@ abstractCompileProgram 1 pl = (dom, notanyRules, denoteRules, cc') where
                 , let res  = compound (reinject f) ((notvar?:any) <$> bits)
                 , let notany_vars = [Pred notAny [v] | (True,v) <- zip bits vars]
                 ] ++
-                [ Pred (denotes f) (args ++ [term0 static]) :- cc
+                [ Pred (denotes f) (args ++ [term0 notvar]) :- cc
                 | (f,aa) <- Map.toList constructors, a <- toList aa
                 , let args = take a vars
                 , let cc   = [Pred notAny [v] | v <- args]

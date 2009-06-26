@@ -56,6 +56,8 @@ import Prelude hiding (pred, any, or)
 import Debug.Trace
 
 type Concrete = PrologTerm String
+type Abstract idt = Any :+: NotVar :+: Compound :+: PrologTerm idt
+
 
 instance Error ParseError
 
@@ -128,7 +130,7 @@ problemParser = do
 goalParser = PrologP.whiteSpace >> Pred <$> PrologP.ident <*> PrologP.parens (PrologP.commaSep1 term)
  where term = msum
                 [((Parsec.string "any"    >> return()) <|> (oneOf "fvo" >> return ())) >> nextVar
-                ,((Parsec.string "static" >> return()) <|> (oneOf "gbi" >> return ())) >> return (term0 static)
+                ,((Parsec.string "static" >> return()) <|> (oneOf "gbi" >> return ())) >> return (term0 notvar)
                 , (>>= return . Right) <$> PrologP.var
                 ]
        nextVar = getState >>= \st -> setState (st+1) >> return2 (Right (VAuto st))

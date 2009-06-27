@@ -21,23 +21,24 @@ import Data.Term.Simple
 import Data.Term.Var
 
 import qualified Language.Prolog.Syntax as Prolog
-import Language.Prolog.Syntax (Program'', Term')
+import Language.Prolog.Syntax (Program'', Term', GoalF)
 import Language.Prolog.Utils
 
 -- | Representation Terms
 type TermR  idt     = TermR' idt Var
 type TermR' idt var = Term1 (Expr (PrologTerm idt)) (Either WildCard var)
-type PrologTerm idt = PrologT :+: T idt :+: V
+type PrologTerm idt = PrologT :+: PrologP :+: T idt :+: V
 
 ---representProgram :: Program'' idp (Term' idt var) -> Program'' idp (TermR' idt var)
-representProgram :: (Monad m, PrologT :<: f, T idt :<: f) =>
+representProgram :: (Monad m, PrologT :<: f, PrologP :<: f, T idp :<: f, T idt :<: f) =>
                   (v -> m a)            -- ^ What to do with variables
                -> (Expr f -> [a] -> a)  -- ^ How to construct a term
                -> m a                   -- ^ How to fill a 'Prolog.Wildcard'
                -> Program'' idp (Term' idt v)
-               -> m (Program'' idp a)
+               -> m (Program'' (Expr f) a)
 representProgram var term wc = mapM3 (foldTermM var
                                          (representTerm term wc))
+                             . fmap2 representPred
 
 --representProgram :: Program'' idp (Term' idt var) -> Program'' idp (TermR' idt var)
 --representProgram = runIdentity . mapM3 (foldTermM (return2 . Right) (representTerm term1 (return wildCard)))
@@ -52,12 +53,18 @@ representTerm :: (Monad m, PrologT :<: f, T idt :<: f) =>
 representTerm term wildCard = f where
     f (Prolog.Int i)      = return $ iterate tsucc tzero !! fromInteger i
     f (Prolog.Tuple tt)   = return $ term tup tt
---    f (Prolog.Term id tt) = return $ term (mkT id) tt
+    f (Prolog.Term id tt) = return $ term (mkT id) tt
     f (Prolog.String s)   = return $ term (string s) []
     f  Prolog.Wildcard    = wildCard
     f (Prolog.Cons h t)   = return $ term cons [h,t]
     f (Prolog.Nil)        = return $ term nil []
     tsucc x = term psucc [x] ; tzero = term zero []
+
+representPred :: (PrologP :<: f, T idp :<: f) => GoalF idp a -> GoalF (Expr f) a
+representPred = f where
+    f (Prolog.Pred id tt) = Prolog.Pred (mkT id) tt
+    f (Prolog.Is x y)     = Prolog.Pred is [x,y]
+    f (x Prolog.:=: y)    = Prolog.Pred eq [x,y]
 
 -- -------------------------
 -- * Wildcards for variables

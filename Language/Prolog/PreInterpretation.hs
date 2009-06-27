@@ -47,7 +47,7 @@ import qualified Data.Traversable as T
 import Data.Traversable (Traversable(..))
 import Text.PrettyPrint as Ppr
 
-import Data.Term (HasId(..), MonadFresh(..), directSubterms)
+import Data.Term (HasId(..), MonadFresh(..), directSubterms, foldTermM)
 import Data.Term.Rules
 import Data.Term.Var
 import Language.Prolog.Representation
@@ -359,7 +359,8 @@ buildPre (DeltaMany delta, sigma) = fixEq f
 -- Stuff
 -- -----
 prepareProgram :: Program'' idp (Term' idt var) -> Program'' idp (TermR' idt var)
-prepareProgram = runIdentity . representProgram (return2 . Right) term1 (return wildCard)
+prepareProgram = runIdentity . mapM3 (foldTermM (return2 . Right)
+                                                (representTerm term1 (return wildCard)))
 
 deriving instance (Ppr id, Ppr [da]) => Ppr (DeltaMany id da)
 

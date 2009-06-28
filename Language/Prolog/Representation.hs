@@ -122,7 +122,7 @@ psucc   = inject (K Succ)
 zero    = inject (K Zero)
 
 instance Ppr PrologT_ where
-    ppr Tup = Ppr.empty
+    ppr Tup = text "tuple"
     ppr Zero = text "0"; ppr Succ = char 's'
     ppr Cons = text "cons"; ppr Nil = text "nil"
     ppr (String s) = quotes (text s)
@@ -212,31 +212,38 @@ instance PprF Any         where pprF _ = text "any"
 instance PprF V           where pprF _ = text "V"
 instance PprF NotVar      where pprF _ = text "notvar"
 instance PprF Static      where pprF _ = text "static"
-instance PprF Compound    where pprF (Compound id dd) = ppr id <> parens (hcat $ punctuate comma $ map ppr dd)
+instance PprF Compound    where
+    pprF (Compound id []) = ppr id
+    pprF (Compound id dd) = ppr id <> parens (hcat $ punctuate comma $ map ppr dd)
 instance PprF FreeArg     where pprF _ = text "free"
 
 -- ** Constructors for abstract compilation
 
-data Denotes idt a = Denotes idt deriving (Eq, Show, Ord)
-data NotAny      a = NotAny      deriving (Eq, Show, Ord)
-data Domain      a = Domain      deriving (Eq, Show, Ord)
+data AbstractCompile a = Denotes a | Domain deriving (Eq, Show, Ord)
+data NotAny a = NotAny    deriving (Eq, Show, Ord)
 
-domain  :: (Domain :<: f) => Expr f
+
+domain  :: (AbstractCompile :<: f) => Expr f
 notAny  :: (NotAny :<: f) => Expr f
-denotes :: (Denotes idt :<: f) => idt -> Expr f
+denotes :: (AbstractCompile :<: f) => Expr f -> Expr f
 
 denotes = inject . Denotes
 domain  = inject Domain
 notAny  = inject NotAny
 
+isNotAny (match -> Just NotAny) = True; isNotAny _ = False
 
-instance Functor (Denotes idt) where fmap _ (Denotes id) = Denotes id
-instance Functor NotAny        where fmap _ NotAny       = NotAny
-instance Functor Domain        where fmap _ Domain       = Domain
+instance Functor AbstractCompile where
+    fmap f (Denotes id) = Denotes (f id)
+    fmap _ Domain       = Domain
+instance Functor NotAny where
+    fmap _ NotAny       = NotAny
 
-instance Ppr idt => PprF (Denotes idt) where pprF (Denotes id) = text "denotes_" <> ppr id
-instance PprF Domain      where pprF Domain = text "domain"
-instance PprF NotAny      where pprF NotAny = text "notAny"
+instance PprF AbstractCompile where
+    pprF (Denotes id) = text "denotes_" <> id
+    pprF Domain       = text "domain"
+instance PprF NotAny where
+    pprF NotAny       = text "notAny"
 
 -- --------
 -- Origami

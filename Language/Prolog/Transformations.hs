@@ -51,8 +51,8 @@ flattenDupVarsC isOk c = do
 
 -- | The standard flattening transformation (see e.g. Bosco & Giovanetti 'Narrowing vs SLD Resolution')
 --   Receives a clause and a scheme to flatten compound terms, and outputs the flattened clause
-flattenC :: (Traversable f, Traversable t, MonadFresh v m) =>
-              (Free f v -> v -> t (Free f v)) -> ClauseF (t (Free f v)) -> m(ClauseF (t (Free f v)))
+--flattenC :: (Traversable f, Traversable t, MonadFresh v m) =>
+  --            (Free f v -> v -> t (Free f v)) -> ClauseF (t (Free f v)) -> m(ClauseF (t (Free f v)))
 flattenC box clause@(h :- b) = do
     (h' :- b', goals) <- runWriterT (mapM2 flattenTerm clause)
     return (h' :- (goals ++ b'))
@@ -77,22 +77,22 @@ introduceWildcards c = fmap2 (>>=f) c where
 -- -----------------------------------------------------
 -- Described in the paper "A bottom-up analysis toolkit"
 
-data QueryAnswer idp a = QueryAll idp | Query idp Int Int | Answer idp deriving (Eq,Ord,Show)
+data QueryAnswer a = QueryAll a | Query a Int Int | Answer a deriving (Eq,Ord,Show)
 
-answer, queryAll :: (QueryAnswer idp :<: f) => idp -> Expr f
-query :: (QueryAnswer idp :<: f) => idp -> Int -> Int -> Expr f
+answer, queryAll :: (QueryAnswer :<: f) => Expr f -> Expr f
+query :: (QueryAnswer :<: f) => Expr f -> Int -> Int -> Expr f
 
-answer       = inject . Answer;
+answer       = inject . Answer
 queryAll     = inject . QueryAll
 query id i j = inject (Query id i j)
-instance Functor (QueryAnswer id) where
-    fmap _ (Answer id)    = Answer id
-    fmap _ (QueryAll id)  = QueryAll id
-    fmap _ (Query id i j) = Query id i j
-instance Ppr id => PprF (QueryAnswer id) where
-    pprF (Answer   id)  = text "answer_" <> ppr id
-    pprF (QueryAll id)  = text "query_" <> ppr id
-    pprF (Query id i j) = text "query_" <> Ppr.int i <> text "_" <> Ppr.int j <> text "_" <> ppr id
+instance Functor QueryAnswer where
+    fmap f (Answer id)    = Answer   (f id)
+    fmap f (QueryAll id)  = QueryAll (f id)
+    fmap f (Query id i j) = Query    (f id) i j
+instance PprF QueryAnswer where
+    pprF (Answer   id)  = text "answer_" <> id
+    pprF (QueryAll id)  = text "query_"  <> id
+    pprF (Query id i j) = text "query_"  <> Ppr.int i <> text "_" <> Ppr.int j <> text "_" <> id
 
 {-  Example.
  Original program:
@@ -112,10 +112,11 @@ instance Ppr id => PprF (QueryAnswer id) where
  call_r(y)     <- call_1_2_r(y).
 -}
 
---queryAnswer :: (Enum var, Eq var, Functor termF, QueryAnswer idp :<: idp', term ~ Free termF var) =>
-  --                 Program'' idp term -> Program'' (Expr idp') term
-queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
+queryAnswer :: (term ~ m var, Enum var, Functor idp, Monad m) =>
+                   Program'' (Expr idp) term -> Program'' (Expr (QueryAnswer :+: idp)) term
+queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm_qa) ++ map answerF pgm_qa
  where
+  pgm_qa = mapPredId (foldExpr (In . Inr)) <$$> pgm
   answerF (Pred h h_args :- cc) =
       Pred (answer h) h_args :- ( Pred (queryAll h) h_args :
                                 [ Pred (answer c) c_args | Pred c c_args <- cc ])
@@ -139,15 +140,16 @@ queryAnswer pgm = concatMap (uncurry queryF) (zip [1..] pgm) ++ map answerF pgm
 querySome p args = Pred (queryAll p) args
 queryAllquery h ar1 ar2 i j = Pred (queryAll h) vars2 :- [Pred (query h i j) vars1]
   where allvars = map (return . toEnum)  [1..]
-        vars1 = take (ar1 + ar2) allvars
-        vars2 = take ar1 $ drop ar2 allvars
+        vars1   = take (ar1 + ar2) allvars
+        vars2   = take ar1 $ drop ar2 allvars
 
-queryAnswerGoal :: (Enum var, Monad mt, QueryAnswer idp :<: idp', term ~ mt var) =>
-                   GoalF idp term -> Program'' (Expr idp') term
+queryAnswerGoal :: (term ~ mt var, Enum var, Monad mt, Functor idp) =>
+                   Clause'' (Expr idp) term -> Program'' (Expr (QueryAnswer :+: idp)) term
 
-queryAnswerGoal  (Pred g g_args)  = [ Pred (query g 0 1) g_args :- []
-                                    , queryAllquery g (length g_args) 0 0 1]
-
+queryAnswerGoal  (Pred g g_args :- cc) = [ Pred (query g' 0 1) g_args :- cc'
+                                          , queryAllquery g' (length g_args) 0 0 1]
+ where g'  = foldExpr (In . Inr) g
+       cc' = mapPredId (foldExpr (In . Inr)) <$> cc
 
 -- --------------------
 -- * Abstraction

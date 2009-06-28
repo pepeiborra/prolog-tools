@@ -46,7 +46,7 @@ import System.Exit
 import System.IO
 import System.Cmd
 import System.FilePath
-import Text.ParserCombinators.Parsec (ParseError, getState, setState, runParser, parseFromFile, parse, oneOf)
+import Text.ParserCombinators.Parsec (Parser, ParseError, getState, setState, runParser, parseFromFile, parse, oneOf)
 import qualified Text.ParserCombinators.Parsec as Parsec
 import Text.PrettyPrint hiding (Mode(..),mode)
 
@@ -100,10 +100,15 @@ main = do
          print (getCookedSuccessPatterns pl)
 -}
 
+type P = NotAny :+: T String
+type A = NotVar :+: Compound :+: Any :+: PrologTerm String
+
 run_bddbddb Opts{..} = do
-  (dom, results) <- computeSuccessPatterns
-                    ComputeSuccessPatternsOpts{depth, verbosity, debug, fp = problemFile
-                                              ,bddbddb_path, mb_goal, pl}
+  let mb_goal' = uncurry abstractCompileGoal <$> mb_goal
+  let opts :: ComputeSuccessPatternsOpts P A
+      opts =  ComputeSuccessPatternsOpts{depth, verbosity, debug, fp = problemFile
+                                         ,bddbddb_path, mb_goal = mb_goal', pl}
+  (dom, results) <- computeSuccessPatterns opts
   echo "bddbddb produced the following success patterns:\n"
   print (vcat $ map ppr $ concat results)
   echo " \nWe can simplify the patterns as follows:\n"
@@ -127,19 +132,19 @@ problemParser = do
         f ('%':' ':'q':'u':'e':'r':'y':':':goal) = Just goal
         f _ = Nothing
 
-goalParser = PrologP.whiteSpace >> Pred <$> PrologP.ident <*> PrologP.parens (PrologP.commaSep1 term)
+goalParser :: Parser (String,[Bool])
+goalParser = PrologP.whiteSpace >> (,) <$> PrologP.ident <*> PrologP.parens (PrologP.commaSep1 term)
  where term = msum
-                [((Parsec.string "any"    >> return()) <|> (oneOf "fvo" >> return ())) >> nextVar
-                ,((Parsec.string "static" >> return()) <|> (oneOf "gbi" >> return ())) >> return (term0 notvar)
-                , (>>= return . Right) <$> PrologP.var
+                [((Parsec.string "any"    >> return()) <|> (oneOf "fvo" >> return ())) >> return False
+                ,((Parsec.string "static" >> return()) <|> (oneOf "gbi" >> return ())) >> return True
+                , (PrologP.var :: Parser (Prolog.Term String)) >> return False
                 ]
-       nextVar = getState >>= \st -> setState (st+1) >> return2 (Right (VAuto st))
 
 parsePrologProblem fp input = either (error . show) id $ do
-     things <- runParser problemParser 0 fp input
+     things <- parse problemParser fp input
      let cc      = [c | Clause      c <- things]
          gg_txt  = [q | QueryString  q <- things]
-     goals <- mapM (runParser goalParser 0 "goal") gg_txt
+     goals <- mapM (parse goalParser "goal") gg_txt
      return (goals, cc)
 
 -- -------------------
@@ -151,7 +156,7 @@ usage = "PrologSuccessPatterns - Computation of abstract success patterns using 
 
 data Opts = Opts  { classpath :: [String]
                   , bddbddb_path :: [String]
-                  , mb_goal   :: Maybe (GoalF String (DatalogTerm (Expr (Abstract String))))
+                  , mb_goal   :: Maybe (String,[Bool])
                   , depth     :: Int
                   , nogoals   :: Bool
                   , mode      :: Mode
@@ -184,7 +189,7 @@ getOptions = do
           (goals, the_pl) = parsePrologProblem problemFile input
           the_goal = if nogoals
                           then Nothing
-                          else  fmap (either (error.show) id . runParser goalParser 0 "goal")
+                          else  fmap (either (error.show) id . parse goalParser "goal")
                                      (listToMaybe (drop 1 nonOptions))
                                 `mplus` listToMaybe goals
       return (opts{problemFile,THIS.pl=the_pl,THIS.mb_goal=the_goal}, nonOptions)

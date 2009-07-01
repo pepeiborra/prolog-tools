@@ -34,11 +34,9 @@ getPrologSignature cc =  PrologSig aritiesF aritiesP where
     aritiesP = Map.fromListWith mappend [ (f, Set.singleton(length tt)) | Pred f tt   <- F.toList =<< cc]
     aritiesF = Map.fromListWith mappend [ (f, Set.singleton(length $ toList t)) | Pred _ args <- F.toList =<< cc, Impure t <- subterms =<< args, Just f <- [getId t]]
 
-
-instance Ord id => HasSignature (Program id) id where
+{-
+instance (HasId termF id, Foldable termF, Ord id) => HasSignature [ClauseF (GoalF id (Free termF v))] id
+   where
     getSignature pgm | (PrologSig cs ps) <- getPrologSignature pgm
         = Sig (Map.keysSet cs) (Map.keysSet ps) (Map.map (head . Set.toList) (cs `mappend` ps))
-
-instance Ord id => HasSignature (Clause id) id where
-    getSignature c | (PrologSig cs ps) <- getPrologSignature [c]
-        = Sig (Map.keysSet cs) (Map.keysSet ps) (Map.map (head . Set.toList) (cs `mappend` ps))
+-}

@@ -13,6 +13,7 @@ import Control.Applicative
 import Control.Monad.Free
 import Control.Monad.State
 import Control.Monad.Writer
+import Data.AlaCarte as Al
 import Data.AlaCarte.Ppr
 import Data.Foldable (Foldable, foldMap, toList)
 import Data.List (nubBy, foldl', groupBy, sort, sortBy, elemIndex, (\\))
@@ -85,6 +86,9 @@ query :: (QueryAnswer :<: f) => Expr f -> Int -> Int -> Expr f
 answer       = inject . Answer
 queryAll     = inject . QueryAll
 query id i j = inject (Query id i j)
+
+isAnswer (Al.match -> Just Answer{}) = True; isAnswer _ = False
+
 instance Functor QueryAnswer where
     fmap f (Answer id)    = Answer   (f id)
     fmap f (QueryAll id)  = QueryAll (f id)

@@ -73,7 +73,8 @@ representPred = f where
 data WildCard = WildCard deriving (Enum, Eq, Ord, Bounded)
 wildCard :: Monad m => m(Either WildCard var)
 wildCard = return (Left WildCard)
-instance Ppr WildCard           where ppr _ = text "_"
+instance Ppr  WildCard where ppr _  = text "_"
+instance Show WildCard where show _ =  "_"
 
 -- --------
 -- * Term0
@@ -184,7 +185,7 @@ isV      (match -> Just V)        = True ; isV _ = False
 isAny    (match -> Just Any)      = True ; isAny _    = False
 isNotvar (match -> Just NotVar{}) = True ; isNotvar _ = False
 isStatic (match -> Just Static{}) = True ; isStatic _ = False
-
+isCompound (match -> Just Compound{}) = True ; isCompound _ = False
 
 instance Functor Any      where fmap _ Any    = Any
 instance Functor NotVar   where fmap _ NotVar = NotVar

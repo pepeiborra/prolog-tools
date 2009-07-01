@@ -25,7 +25,7 @@ import Control.Applicative
 import Control.Arrow ((***))
 import Control.Exception
 import Control.Monad.Identity(Identity(..))
-import Control.Monad (mplus, filterM, replicateM, liftM, join, when, forM)
+import Control.Monad (mplus, filterM, replicateM, liftM, join, when, forM, forM_)
 import Control.Monad.Free (Free(..), mapFree, foldFree, evalFree, foldFreeM, isPure)
 import Control.Monad.State (StateT, evalState, evalStateT)
 import Control.Monad.Writer (WriterT, runWriter, runWriterT)
@@ -47,7 +47,7 @@ import qualified Data.Traversable as T
 import Data.Traversable (Traversable(..))
 import Text.PrettyPrint as Ppr
 
-import Data.Term (HasId(..), MonadFresh(..), directSubterms, mapTermSymbols, foldTermM)
+import Data.Term (HasId(..), MapId(..), MonadFresh(..), directSubterms, mapTermSymbols, foldTermM)
 import Data.Term.Rules
 import Data.Term.Var
 import Language.Prolog.Representation
@@ -133,7 +133,7 @@ computeSuccessPatterns :: forall idp idp' t t' as.
                            PrologTerm String :<: as, NotVar :<: as, Any :<: as, Compound :<: as,
                            T String :<: idp, NotAny :<: idp
                            ) =>
-                          ComputeSuccessPatternsOpts idp as -> IO ([Expr as], [[GoalF (Expr idp') t']])
+                          ComputeSuccessPatternsOpts idp as -> IO (Set(Expr as), [[GoalF (Expr idp') t']])
 computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
          bddbddb_jar <- findBddJarFile bddbddb_path
          let mb_goal' = (fmap (introduceWildcards . runFresh (flattenDupVarsC isLeft)) . queryAnswerGoal)
@@ -152,74 +152,93 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
          withTempFile (not debug) "." (fp++".bddbddb") $ \fpbddbddb hbddbddb -> do
 
          -- Domain
-         echo ("The domain is: " ++ show (ppr dom))
+         debugMsg ("The domain is: " ++ show (ppr dom))
          withTempFile (not debug) "." (fp++".map") $ \fpmap hmap -> do
          let dump_bddbddb txt = hPutStrLn hbddbddb txt >> echo txt
 
          echo ("writing domain map file to " ++ fpmap)
          dump_bddbddb "### Domains"
-         let domsize = length dom
+         let domsize = Set.size dom
          dump_bddbddb ("D " ++ show domsize ++ " " ++ takeFileName fpmap)
-         hPutStrLn hmap (show (vcat $ map (ppr) dom))
+         hPutStrLn hmap (show (vcat $ map (ppr) $ Set.toList dom))
          hClose hmap
-
          -- Relations
          dump_bddbddb "\n### Relations\n"
-         dump_bddbddb $ unlines $ map show
-             [ text "denotes_" <> ppr c <> ppr (a+1) <> parens (hsep $ punctuate comma $ replicate (a+1) (text "arg : D"))
-                    | (c,aa) <- Map.toList constructors, a <- toList aa]
-         dump_bddbddb $ unlines $ map show
-             [ ppr c <> ppr a <> parens (hsep $ punctuate comma $ replicate a (text "arg : D"))
-                        <+>  text "outputtuples"
-                    | (c,aa) <- predicates, a <- toList aa]
-         dump_bddbddb "notAny1 (arg : D) inputtuples"
-         let domainDict = Map.fromList (dom `zip` [(0::Int)..])
 
+         dump_bddbddb "notAny1 (arg : D) inputtuples"
          withTempFile' (not debug) (takeDirectory fp) "notAny1.tuples" $ \notanyfp notanyh -> do
          echo ("writing facts for notAny1 in file " ++ notanyfp )
          hPutStrLn notanyh $ unlines (("# D0: " ++ show domsize) : [ show i | i <- [1..domsize - 1]])
          hClose notanyh
+         let domainDict = Map.fromList (Set.toList dom `zip` [(0::Int)..])
+             toDomain f | Just i <- Map.lookup f domainDict = i
+                        | otherwise = error ("Symbol not in domain: " ++ show (ppr f))
+
+         when (depth <= 1) $ do
+           dump_bddbddb $ unlines $ map show
+             [ text "denotes_" <> ppr c <> ppr (a+1) <> parens (hsep $ punctuate comma $ replicate (a+1) (text "arg : D"))
+                        <+> if depth > 1 then text "inputtuples" else Ppr.empty
+                    | (c,aa) <- Map.toList constructors, a <- toList aa]
+
+         toBeDeleted <- forM denotes $ \cc@(Pred cons@(match -> Just Denotes{}) (length -> ar) :- [] : _) -> do
+                            let name = ppr cons <> ppr ar
+                            dump_bddbddb $ show (name <> parens (hsep $ punctuate comma $ replicate ar (text "arg : D"))
+                                                    <+> text "inputtuples")
+                            withTempFile' False (takeDirectory fp) (show name ++ ".tuples") $ \fp h -> do
+                            echo ("writing facts for " ++ show name ++ " in file " ++ fp )
+                            debugMsg $ show (vcat $ map ppr cc)
+                            let header = "# " ++ unwords ["D" ++ show i ++ ": " ++ show domsize | i <- [0 .. ar - 1]]
+                                tuples = [ unwords $ map (show.ppr) tt
+                                           | Pred _ tt :- [] <- mapTermSymbols toDomain <$$$> cc]
+                            hPutStrLn h $ unlines (header : tuples)
+                            hClose h
+                            return fp
+         (flip finally (when (not debug) $ mapM_ removeFile toBeDeleted)) $ do
+           dump_bddbddb $ unlines $ map show
+             [ ppr c <> ppr a <> parens (hsep $ punctuate comma $ replicate a (text "arg : D"))
+                        <+>  text "outputtuples"
+                    | (c,aa) <- predicates, a <- toList aa]
 
          -- Rules
-         dump_bddbddb "\n### Rules\n"
-         let cc        = foldFree return toId <$$$> clauses
-             den_cc    = foldFree return toId <$$$> denotes
-             mb_goal_c = foldFree return toId <$$$$> mb_goal'
-             toId (T f) | Just i <- Map.lookup f domainDict = term0 i
-                        | otherwise = error ("Symbol not in domain: " ++ show (ppr f))
-         dump_bddbddb (show $ pprBddbddb den_cc)
-         dump_bddbddb (show $ pprBddbddb cc)
-         maybe (return ()) (dump_bddbddb . show . pprBddbddb) mb_goal_c
+           dump_bddbddb "\n### Rules\n"
+           let cc        = mapTermSymbols toDomain <$$$> clauses
+               den_cc    = mapTermSymbols toDomain <$$$> concat denotes
+               mb_goal_c = mapTermSymbols toDomain <$$$$> mb_goal'
+           when (depth <= 1) $ dump_bddbddb (show $ pprBddbddb den_cc)
+           dump_bddbddb (show $ pprBddbddb cc)
+           maybe (return ()) (dump_bddbddb . show . pprBddbddb) mb_goal_c
 
          -- Running bddbddb
-         hClose hbddbddb
-         hClose hmap
-         let cmdline = if verbosity>1 then  ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb)
-                                      else ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb ++ "> /dev/null 2> /dev/null")
-         echo ("\nCalling bddbddb with command line: " ++ cmdline ++ "\n")
-         exitcode <- system cmdline
+           hClose hbddbddb
+           hClose hmap
+           let cmdline = if verbosity>1 then ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb)
+                                        else ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb ++ "> /dev/null 2> /dev/null")
+           echo ("\nCalling bddbddb with command line: " ++ cmdline ++ "\n")
+           exitcode <- system cmdline
 
-         case exitcode of
-           ExitFailure{} -> error ("bddbddb failed with an error")
-           ExitSuccess   -> do
-            let domArray = listArray (0, domsize) dom
-            results <- forM predicates $ \(p,ii) -> liftM concat $ forM (toList ii) $ \i -> do
-                         echo ("Processing file " ++ show p ++ show i ++ ".tuples")
-                         let fp_result = (takeDirectory fp </> show p ++ show i <.> "tuples")
-                         output <- readFile fp_result
-                         evaluate (length output)
-                         when (not debug) $ removeFile fp_result
-                         let tuples = map (map (uncurry wildOrInt) . zip [1..] . words) (drop 1 $ lines output)
-                         return [ Pred p (map (either var' (term0 . (domArray!))) ii)
-                                  | ii <- tuples
-                                  , all (< domsize) [i | Right i <- ii]]
-            return (dom, filter (not.null) results)
+           case exitcode of
+             ExitFailure{} -> error ("bddbddb failed with an error")
+             ExitSuccess   -> do
+              let domArray = listArray (0, domsize) (Set.toList dom)
+                  outpredicates = if debug then predicates else filter (isAnswer . fst) predicates
+              results <- forM outpredicates $ \(p,ii) -> liftM concat $ forM (toList ii) $ \i -> do
+                           echo ("Processing file " ++ show p ++ show i ++ ".tuples")
+                           let fp_result = (takeDirectory fp </> show p ++ show i <.> "tuples")
+                           output <- readFile fp_result
+                           evaluate (length output)
+                           when (not debug) $ removeFile fp_result
+                           let tuples = map (map (uncurry wildOrInt) . zip [1..] . words) (drop 1 $ lines output)
+                           return [ Pred p (map (either var' (term0 . (domArray!))) ii)
+                                    | ii <- tuples
+                                    , all (< domsize) [i | Right i <- ii]]
+              return (dom, filter (not.null) results)
 
     where wildOrInt v "*" = Left v
           wildOrInt _ i   = Right (read i)
-          echo x | verbosity>0   = hPutStrLn stderr x
-                 | otherwise = return ()
-
+          echo x  | verbosity>0 = hPutStrLn stderr x
+                  | otherwise   = return ()
+          debugMsg x | debug       = hPutStrLn stderr x
+                     | otherwise   = return ()
           findBddJarFile = go . (++ ["bddbdd.jar"]) where
               go [] = error "Cannot find bddbddb.jar"
               go (fp:fps) = do
@@ -245,15 +264,17 @@ abstractCompileGoal :: (NotAny :<: pf, T String :<: pf, Monad m, Enum v) => Stri
 abstractCompileGoal f ii = Pred (mkT f) (take (length ii) vars) :- [ Pred notAny [v]| (False,v) <- zip ii vars]
   where vars = return <$> [toEnum 0 .. ]
 
-abstractCompileProgram :: (Ord idt, Ppr idt, Ord (Expr idp), PprF idp,
+abstractCompileProgram :: forall idt idp var fd d pgmany pgmden pgm.
+                         (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, Ord d,
                          var    ~ Either WildCard Var,
                          pgmany ~ AbstractDatalogProgram  NotAny d,
                          pgmden ~ AbstractDatalogProgram (NotAny :+: AbstractCompile :+: PrologTerm idt) d,
                          pgm    ~ AbstractDatalogProgram (AbstractCompile :+: PrologTerm idt :+: idp) d,
-                         d ~ (Expr fd), PrologTerm idt :<: fd, Any :<: fd, NotVar :<: fd, Compound :<: fd) =>
+                         d      ~ (Expr fd),
+                         PrologTerm idt :<: fd, Any :<: fd, NotVar :<: fd, Compound :<: fd) =>
                          Int                                -- ^ Depth of the Preinterpretation used
                       ->  Program'' (Expr idp) (TermR idt)  -- ^ Original Program
-                      -> ([d], pgmany, pgmden,pgm)          -- ^ (domain, notAny, denotes, program)
+                      -> (Set d, pgmany, [pgmden], pgm)          -- ^ (domain, notAny, denotes, program)
 {-
 abstractCompileProgram  0 pl = (dom, [], denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature pl
@@ -269,8 +290,9 @@ abstractCompileProgram  0 pl = (dom, [], denoteRules, cc') where
             . denoteAndDomainize reinject
             . fmap (mapPredId reinject)
             ) pl
--}
-abstractCompileProgram 1 pl = (dom, notanyRules, denoteRules, cc') where
+
+
+abstractCompileProgram 1 pl = (Set.fromList dom, notanyRules, denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature pl
   dom = any : [ compound (reinject f) args | (f,ii) <- Map.toList constructors
                                      , i <- toList ii
@@ -278,22 +300,15 @@ abstractCompileProgram 1 pl = (dom, notanyRules, denoteRules, cc') where
                                      ]
   notanyRules = [Pred notAny [term0 d] :- [] | d <- tail dom]
 
-  denoteRules = [Pred (denotes (reinject f)) (args ++ [term0 res]) :- notany_vars
+  denoteRules = [ [Pred (denotes (reinject f)) (args ++ [term0 res]) :- notany_vars
+                  | groundness <- [0..2^a - 1]
+                  , let bits = reverse $ take a (reverse(dec2bin groundness) ++ repeat False)
+                  , let args = zipWith (\isnotvar v -> if isnotvar then v else term0 any) bits vars
+                  , let res  = compound (reinject f) ((notvar?:any) <$> bits)
+                  , let notany_vars = [Pred notAny [v] | (True,v) <- zip bits vars]
+                  ]
                 | (f, aa) <- Map.toList constructors, a <- toList aa
-                , groundness <- [0..2^a - 1]
-                , let bits = reverse $ take a (reverse(dec2bin groundness) ++ repeat False)
-                , let args = zipWith (\isnotvar v -> if isnotvar then v else term0 any) bits vars
-                , let res  = compound (reinject f) ((notvar?:any) <$> bits)
-                , let notany_vars = [Pred notAny [v] | (True,v) <- zip bits vars]
-                ]  {- ++
-                [ Pred (denotes (reinject f)) (args ++ [term0 notvar]) :- cc
-                | (f,aa) <- Map.toList constructors, a <- toList aa
-                , let args = take a vars
-                , let cc   = [Pred notAny [v] | v <- args]
-                ]  ++
-                [ Pred (denotes f) (replicate (a+1) (term0 any)) :- []
-                | (f,aa) <- Map.toList constructors, a <- toList aa, a > 0
-                ] -}
+                ]
 
   vars = (return . Right . VAuto) <$> [0..]
 
@@ -302,8 +317,38 @@ abstractCompileProgram 1 pl = (dom, notanyRules, denoteRules, cc') where
             . fmap2 (mapTermSymbols reinject)
             . denoteAndDomainize
             ) pl
+-}
 
-  mkVar i = (return $ Right $ VAuto i)
+abstractCompileProgram depth pl  = (dom, notAnyRules, denoteRules, cc') where
+  PrologSig constructors _ = getPrologSignature pl
+  dom = mkDom depth
+
+  notAnyRules = [Pred notAny [term0 d] :- [] | d <- Set.toList $ Set.delete any dom]
+
+  denoteRules = [      [Pred (denotes (reinject f)) (term0 <$> (args ++ [res])) :- []
+                        | args    <- replicateM a (Set.toList dom)
+                        , let res  = cutId depth $ compound (reinject f) args
+                       ]
+                | (f, aa) <- Map.toList constructors, a <- toList aa
+                ]
+
+  cc' = map ( introduceWildcards
+            . runFresh (flattenDupVarsC isLeft)
+            . fmap2 (mapTermSymbols reinject)
+            . denoteAndDomainize
+            ) pl
+
+  mkDom :: Int -> Set(Expr fd)
+  mkDom 0 = Set.fromList [notvar, any]
+  mkDom i = Set.fromList (mkLevel (Set.toList $ mkDom (i-1)))
+
+  mkLevel dom = any : [ compound (reinject f) args | (f,ii) <- Map.toList constructors
+                                     , i <- toList ii
+                                     , args <- replicateM i dom]
+
+  cutId 0 t = if isAny t then t else notvar
+  cutId i (match -> Just (Compound c tt)) = compound c (cutId (i-1) <$> tt)
+  cutId i t = t
 
 
 denoteAndDomainize :: (idp' ~ (AbstractCompile :+: idc :+: idp),
@@ -381,7 +426,7 @@ withTempFile delete dir name m = bracket (openTempFile dir' name') close (uncurr
         close = if delete then  (removeFile . fst) else (\_ -> return ())
 
 withTempFile' delete dir name m = do
-    doesFileExist fp >>= \true -> when true (error ("Please delete file " ++ fp ++ " and start again"))
+    -- doesFileExist fp >>= \true -> when true (error ("Please delete file " ++ fp ++ " and start again"))
     bracket (openFile fp ReadWriteMode) close (m fp)
   where fp = dir' </> name'
         (dirname, name') = splitFileName name

@@ -38,3 +38,7 @@ getPrologSignature cc =  PrologSig aritiesF aritiesP where
 instance Ord id => HasSignature (Program id) id where
     getSignature pgm | (PrologSig cs ps) <- getPrologSignature pgm
         = Sig (Map.keysSet cs) (Map.keysSet ps) (Map.map (head . Set.toList) (cs `mappend` ps))
+
+instance Ord id => HasSignature (Clause id) id where
+    getSignature c | (PrologSig cs ps) <- getPrologSignature [c]
+        = Sig (Map.keysSet cs) (Map.keysSet ps) (Map.map (head . Set.toList) (cs `mappend` ps))

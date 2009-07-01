@@ -111,10 +111,11 @@ run_bddbddb Opts{..} = do
   (dom, results) <- computeSuccessPatterns opts
   echo "bddbddb produced the following success patterns:\n"
   print (vcat $ map ppr $ concat results)
-  echo " \nWe can simplify the patterns as follows:\n"
+  when simplify $ do
+    echo " \nWe can simplify the patterns as follows:\n"
 --  let zipped_results = abstract (term0 <$> dom) <$> results
-  let zipped_results = abstractAnys any <$> results
-  print (vcat $ map ppr $ concat zipped_results)
+    let zipped_results = abstractAnys any <$> results
+    print (vcat $ map ppr $ concat zipped_results)
 
 -- ---------------
 
@@ -164,16 +165,19 @@ data Opts = Opts  { classpath :: [String]
                   , pl        :: Program String
                   , verbosity :: Int
                   , debug     :: Bool
+                  , simplify  :: Bool
                   }
 
-defOpts = Opts { classpath = []
+defOpts = Opts { classpath    = []
                , bddbddb_path = bddbddb_jar_paths
-               , mb_goal=Nothing
-               , mode = Bddbddb
-               , nogoals = False
-               , verbosity = 1
-               , debug = False
-               , depth = 1}
+               , mb_goal      = Nothing
+               , mode         = Bddbddb
+               , nogoals      = False
+               , verbosity    = 1
+               , debug        = False
+               , simplify     = False
+               , depth        = 1
+               }
 
 data Mode = Bddbddb | Fixpoint
 
@@ -196,13 +200,14 @@ getOptions = do
 
 
 opts = [ Option "" ["bddbddb"]         (ReqArg setBddbddb "PATH") "Path to the bddbddb jar file"
-       , Option "d" ["depth"]          (ReqArg setDepth "0-1") "Depth of the approximation (default: 1)"
+       , Option "d" ["depth"]          (ReqArg setDepth "NUM") "Depth of the approximation (default: 1)"
        , Option "" ["cp","classpath"]  (ReqArg setCP "PATHS")     "Additional classpath for the Java VM"
        , Option "b" [] (NoArg (\opts -> return opts{mode=Bddbddb}))  "Use bddbddb to compute the approximation (DEFAULT)"
        , Option "f" [] (NoArg (\opts -> return opts{mode=Fixpoint})) "Solve the fixpoint equation to compute the approximation (slower)"
        , Option "" ["nogoals","bottomup"] (NoArg setNogoals)     "Ignore any goals and force a bottom-up analysis"
        , Option "v" ["verbose"] (OptArg setVB "0-2") "Set verbosity level (default: 1)"
        , Option ""  ["debug"] (NoArg (\opts -> return opts{THIS.debug=True})) "Do not delete intermediate files"
+       , Option "s"  ["simplify"] (NoArg (\opts -> return opts{THIS.simplify=True})) "Simplify the patterns returned"
        , Option "h?" ["help"] (NoArg $ \_ -> putStrLn (usageInfo usage opts) >> exitSuccess) "Displays this help screen"
        ]
 
@@ -210,7 +215,7 @@ setCP arg opts = return opts{classpath = splitBy (== ':') arg}
 setBddbddb arg opts = return opts{THIS.bddbddb_path = [arg]}
 setNogoals opts = return opts{nogoals = True}
 setVB arg opts = return opts{THIS.verbosity = maybe 1 read arg}
-setDepth arg opts = return opts{THIS.depth = min 1 (max 0 (read arg))}
+setDepth arg opts = return opts{THIS.depth = read arg}
 
 splitBy :: (a->Bool) -> [a] -> [[a]]
 splitBy _ [] = []

@@ -64,7 +64,9 @@ representPred :: (PrologP :<: f, T idp :<: f) => GoalF idp a -> GoalF (Expr f) a
 representPred = f where
     f (Prolog.Pred id tt) = Prolog.Pred (mkT id) tt
     f (Prolog.Is x y)     = Prolog.Pred is [x,y]
+    f  Prolog.Cut         = Prolog.Pred cut []
     f (x Prolog.:=: y)    = Prolog.Pred eq [x,y]
+    f (Prolog.Ifte b t e) = Prolog.Pred ifte [b,t,e]
 
 -- -------------------------
 -- * Wildcards for variables
@@ -129,15 +131,19 @@ instance Ppr PrologT_ where
     ppr (String s) = quotes (text s)
 
 type PrologP  = K PrologP_
-data PrologP_ = Is | Eq deriving (Eq,Ord,Show)
+data PrologP_ = Is | Eq | Cut | Ifte deriving (Eq,Ord,Show)
 
-is,eq :: (PrologP :<: f) => Expr f
-is = inject (K Is)
-eq = inject (K Eq)
+is,eq,cut,ifte :: (PrologP :<: f) => Expr f
+is  = inject (K Is)
+eq  = inject (K Eq)
+cut = inject (K Cut)
+ifte= inject (K Ifte)
 
 instance Ppr PrologP_ where
     ppr Is = text "is"
     ppr Eq = text "eq"
+    ppr Cut = text "!"
+    ppr Ifte = text "ifte"
 
 
 -- ------------------------------

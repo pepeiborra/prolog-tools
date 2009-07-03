@@ -152,7 +152,7 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
          withTempFile (not debug) "." (fp++".bddbddb") $ \fpbddbddb hbddbddb -> do
 
          -- Domain
-         debugMsg ("The domain is: " ++ show (ppr dom))
+         echo ("The domain is: " ++ show (ppr dom))
          withTempFile (not debug) "." (fp++".map") $ \fpmap hmap -> do
          let dump_bddbddb txt = hPutStrLn hbddbddb txt >> echo txt
 
@@ -173,12 +173,6 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
          let domainDict = Map.fromList (Set.toList dom `zip` [(0::Int)..])
              toDomain f | Just i <- Map.lookup f domainDict = i
                         | otherwise = error ("Symbol not in domain: " ++ show (ppr f))
-
-         when (depth <= 1) $ do
-           dump_bddbddb $ unlines $ map show
-             [ text "denotes_" <> ppr c <> ppr (a+1) <> parens (hsep $ punctuate comma $ replicate (a+1) (text "arg : D"))
-                        <+> if depth > 1 then text "inputtuples" else Ppr.empty
-                    | (c,aa) <- Map.toList constructors, a <- toList aa]
 
          toBeDeleted <- forM denotes $ \cc@(Pred cons@(match -> Just Denotes{}) (length -> ar) :- [] : _) -> do
                             let name = ppr cons <> ppr ar
@@ -204,7 +198,6 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
            let cc        = mapTermSymbols toDomain <$$$> clauses
                den_cc    = mapTermSymbols toDomain <$$$> concat denotes
                mb_goal_c = mapTermSymbols toDomain <$$$$> mb_goal'
-           when (depth <= 1) $ dump_bddbddb (show $ pprBddbddb den_cc)
            dump_bddbddb (show $ pprBddbddb cc)
            maybe (return ()) (dump_bddbddb . show . pprBddbddb) mb_goal_c
 

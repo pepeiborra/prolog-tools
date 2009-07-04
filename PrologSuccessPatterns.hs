@@ -100,7 +100,7 @@ main = do
          print (getCookedSuccessPatterns pl)
 -}
 
-type P = NotAny :+: T String
+type P = NotAny :+: T String :+: PrologP
 type A = NotVar :+: Compound :+: Any :+: PrologTerm String
 
 run_bddbddb Opts{..} = do

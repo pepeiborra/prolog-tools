@@ -403,10 +403,11 @@ buildPre (DeltaMany delta, sigma) = fixEq f
 -- -----
 -- Stuff
 -- -----
-prepareProgram :: (T idp :<: pf) => Program'' idp (Term' idt var) -> Program'' (Expr pf) (TermR' idt var)
+prepareProgram :: (T idp :<: pf, PrologP :<: pf, var ~ Var) => Program'' idp (Term' idt var) -> Program'' (Expr pf) (TermR' idt var)
 prepareProgram = runIdentity . mapM3 (foldTermM (return2 . Right)
                                                 (representTerm term1 (return wildCard)))
-                             . fmap2 (mapPredId mkT)
+                             . fmap2 representPred
+                             . addBuiltInPredicates
 
 deriving instance (Ppr id, Ppr [da]) => Ppr (DeltaMany id da)
 

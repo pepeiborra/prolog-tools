@@ -2,26 +2,35 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-overlapping-patterns #-}
 
 module Language.Prolog.Representation where
 
 import Control.Applicative (pure, Applicative(..), (<$>))
 import Data.Bifunctor
-import Data.Foldable
-import Data.Monoid (Monoid(..))
+import Data.Foldable (Foldable, foldMap, toList)
+import Data.List (find)
+import Data.Maybe
+import Data.Monoid (Monoid(..), getAny)
+import qualified Data.Monoid as Monoid
 import Data.Traversable
+import qualified Data.Set as Set
+import Language.Haskell.TH (runIO)
+import Text.ParserCombinators.Parsec (parse)
 import Text.PrettyPrint as Ppr
 
 import Data.AlaCarte
 import Data.AlaCarte.Ppr
-import Data.Term hiding (match)
+import Data.Term (Term, Free(..), HasId(..), foldTermM)
 import Data.Term.Ppr
+import Data.Term.Rules
 import Data.Term.Simple
 import Data.Term.Var
 
 import qualified Language.Prolog.Syntax as Prolog
-import Language.Prolog.Syntax (Program'', Term', GoalF)
+import Language.Prolog.Parser (program)
+import Language.Prolog.Syntax (Program'', Term', ClauseF(..),  GoalF(Pred, (:=:)))
 import Language.Prolog.Utils
 
 -- | Representation Terms
@@ -262,3 +271,48 @@ instance Traversable (K x) where traverse _ (K x) = Control.Applicative.pure (K 
 
 instance Ppr x => Ppr  (K x a) where ppr  (K x) = ppr x
 instance Ppr x => PprF (K x)   where pprF (K x) = ppr x
+
+-- ------------------------------
+-- Defaults and built-ins
+-- ------------------------------
+
+Right preludePl = $(do pgm <- runIO (readFile "prelude.pl")
+                       case parse program "prelude.pl" pgm of -- parse just for compile time checking
+                         Left err  -> error (show err)
+                         Right _ -> [| fromRight <$$> parse program "prelude.pl" pgm|]
+                   )                 -- actual parsing ^^ happens (again) at run time.
+                                     -- I am too lazy to write the required LiftTH instances.
+  where fromRight (Right a) = a
+
+preludePreds = Set.fromList [ f | Pred f _ :- _ <- preludePl]
+
+addBuiltInPredicates :: Functor f => [ClauseF (GoalF id (Free f Var))] -> [ClauseF (GoalF id (Free f Var))]
+addBuiltInPredicates = insertEqual . insertIs
+  where  insertEqual       cc = if getAny $ foldMap2 (Monoid.Any . isEqual) cc then eqclause `mappend` cc else cc
+         insertIs          cc = if getAny $ foldMap2 (Monoid.Any . isIs)    cc then isclause `mappend` cc else cc
+
+         eqclause = let x = Prolog.var "X" in [x :=: x       :- []]
+         isclause = let x = Prolog.var "X" in [Prolog.Is x x :- []]
+         isEqual (_ :=: _) = True; isEqual _ = False
+         isIs Prolog.Is{} = True; isIs _ = False
+
+addMissingPredicates cc0
+  | Set.null undefined_cc0 = cc0
+  | otherwise = (insertDummy . insertPrelude) cc0
+
+   where undefined_cc0 = undefinedPreds cc0
+
+         undefinedPreds    cc = Set.fromList [ f | f <- toList (getDefinedSymbols cc `Set.difference` definedPredicates cc)]
+         definedPredicates cc = Set.fromList [ f | Pred f _ :- _ <- cc]
+
+         insertPrelude cc = if not (Set.null (Set.intersection (undefinedPreds cc) preludePreds)) then cc' `mappend` cc else cc
+           where cc' = foldr renamePred (cc `mappend` preludePl) (toList repeatedIdentifiers)
+                 repeatedIdentifiers = preludePreds `Set.intersection` definedPredicates cc0
+         insertDummy cc =  [ Pred f (take (getArity cc f) vars) :- [] | f <- toList (undefinedPreds cc)] ++ cc
+         renamePred f = fmap2 (rename (findFreeSymbol cc0 f))
+           where rename f' (Pred f tt) | f == f' = Pred f' tt
+                 rename _ x = x
+
+         vars = [Prolog.var ("X" ++ show i) | i <- [0..]]
+
+         findFreeSymbol sig pre = fromJust $ find (`Set.notMember` getAllSymbols sig) (pre : [pre ++ show i | i <- [0..]])

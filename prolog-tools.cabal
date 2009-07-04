@@ -9,11 +9,12 @@ homepage:
 synopsis: Some Prolog related tools
 description: 
 category:
+extra-source-files:  prelude.pl
 author: Pepe Iborra
 
 Library
   buildable: True
-  build-depends: base, term, prolog, containers, mtl, alacarte, control-monad-free >= 0.4
+  build-depends: base, term, prolog, containers, mtl, alacarte, control-monad-free >= 0.4, template-haskell
   exposed-modules:
      Language.Prolog.Signature
      Language.Prolog.SharingAnalysis

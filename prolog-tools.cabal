@@ -4,13 +4,13 @@ Cabal-Version:  >= 1.2
 build-type: Simple
 license: AllRightsReserved
 license-file: ""
-copyright: Pepe Iborra, All Rights Reserved
+copyright: Jose Iborra, All Rights Reserved
 homepage:
 synopsis: Some Prolog related tools
 description: 
 category:
+author: Jose Iborra
 extra-source-files:  prelude.pl
-author: Pepe Iborra
 
 Library
   buildable: True

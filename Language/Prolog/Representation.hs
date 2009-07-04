@@ -9,7 +9,7 @@ module Language.Prolog.Representation where
 
 import Control.Applicative (pure, Applicative(..), (<$>))
 import Data.Bifunctor
-import Data.Foldable (Foldable, foldMap, toList)
+import Data.Foldable (Foldable(..), toList)
 import Data.List (find)
 import Data.Maybe
 import Data.Monoid (Monoid(..), getAny)
@@ -19,13 +19,19 @@ import qualified Data.Set as Set
 import Language.Haskell.TH (runIO)
 import Text.ParserCombinators.Parsec (parse)
 import Text.PrettyPrint as Ppr
+import Prelude hiding (foldr)
+
+import Data.DeriveTH
+import Data.Derive.Functor
+import Data.Derive.Foldable
+import Data.Derive.Traversable
 
 import Data.AlaCarte
 import Data.AlaCarte.Ppr
 import Data.Term (Term, Free(..), HasId(..), foldTermM)
 import Data.Term.Ppr
 import Data.Term.Rules
-import Data.Term.Simple
+import Data.Term.Simple hiding (id)
 import Data.Term.Var
 
 import qualified Language.Prolog.Syntax as Prolog
@@ -236,7 +242,7 @@ instance PprF FreeArg     where pprF _ = text "free"
 -- ** Constructors for abstract compilation
 
 data AbstractCompile a = Denotes a | Domain deriving (Eq, Show, Ord)
-data NotAny a = NotAny    deriving (Eq, Show, Ord)
+data NotAny a = NotAny deriving (Eq, Show, Ord)
 
 
 domain  :: (AbstractCompile :<: f) => Expr f
@@ -248,18 +254,13 @@ domain  = inject Domain
 notAny  = inject NotAny
 
 isNotAny (match -> Just NotAny) = True; isNotAny _ = False
+isDenotes(match -> Just Denotes{}) = True; isDenotes _ = False
 
-instance Functor AbstractCompile where
-    fmap f (Denotes id) = Denotes (f id)
-    fmap _ Domain       = Domain
-instance Functor NotAny where
-    fmap _ NotAny       = NotAny
+instance Functor NotAny     where fmap _ NotAny     = NotAny
+instance Foldable NotAny    where foldMap _ _       = mempty
+instance Traversable NotAny where traverse _ NotAny = pure NotAny
 
-instance PprF AbstractCompile where
-    pprF (Denotes id) = text "denotes_" <> id
-    pprF Domain       = text "domain"
-instance PprF NotAny where
-    pprF NotAny       = text "notAny"
+instance PprF NotAny where pprF NotAny = text "notAny"
 
 -- --------
 -- Origami
@@ -316,3 +317,16 @@ addMissingPredicates cc0
          vars = [Prolog.var ("X" ++ show i) | i <- [0..]]
 
          findFreeSymbol sig pre = fromJust $ find (`Set.notMember` getAllSymbols sig) (pre : [pre ++ show i | i <- [0..]])
+
+-- --------------------
+-- Deriving boilerplate
+-- --------------------
+
+$(derive makeFunctor     ''AbstractCompile)
+$(derive makeFoldable    ''AbstractCompile)
+$(derive makeTraversable ''AbstractCompile)
+
+
+instance PprF AbstractCompile where
+    pprF (Denotes id) = text "denotes_" <> id
+    pprF Domain       = text "domain"

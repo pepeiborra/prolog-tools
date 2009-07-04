@@ -108,6 +108,17 @@ liftI f (I i) = I (f i)
 -- ------------
 -- Driver
 -- ------------
+data Direction = Input | Output | None deriving (Eq,Ord)
+isInput Input = True; isInput _ = False
+isOutput Output = True; isOutput _ = False
+
+instance Show Direction where
+  show Input  = "inputtuples"
+  show Output = "outputtuples"
+  show None   = ""
+
+instance Ppr Direction where ppr = text . show
+
 data ComputeSuccessPatternsOpts idp as = ComputeSuccessPatternsOpts
     { mb_goal   :: Maybe (Clause'' (Expr idp) (DatalogTerm (Expr as)))
     , pl        :: Program String
@@ -131,7 +142,7 @@ computeSuccessPatterns :: forall idp idp' t t' as.
                           (t' ~ Term0 (Expr as) Var, idp' ~ (QueryAnswer :+: idp),
                            PprF idp, PprF as, Ord (Expr idp'), Ord (Expr as),
                            PrologTerm String :<: as, NotVar :<: as, Any :<: as, Compound :<: as,
-                           T String :<: idp, NotAny :<: idp
+                           T String :<: idp, PrologP :<: idp,  NotAny :<: idp, DirectionF idp
                            ) =>
                           ComputeSuccessPatternsOpts idp as -> IO (Set(Expr as), [[GoalF (Expr idp') t']])
 computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
@@ -174,23 +185,24 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
              toDomain f | Just i <- Map.lookup f domainDict = i
                         | otherwise = error ("Symbol not in domain: " ++ show (ppr f))
 
-         toBeDeleted <- forM denotes $ \cc@(Pred cons@(match -> Just Denotes{}) (length -> ar) :- [] : _) -> do
+         toBeDeleted <- forM (filter (isInput.direction.pred.cHead) <$> denotes) $
+                          \cc@(Pred cons@(match -> Just Denotes{}) (length -> ar) :- [] : _) -> do
                             let name = ppr cons <> ppr ar
                             dump_bddbddb $ show (name <> parens (hsep $ punctuate comma $ replicate ar (text "arg : D"))
-                                                    <+> text "inputtuples")
+                                                    <+> ppr (direction cons))
                             withTempFile' False (takeDirectory fp) (show name ++ ".tuples") $ \fp h -> do
-                            echo ("writing facts for " ++ show name ++ " in file " ++ fp )
-                            debugMsg $ show (vcat $ map ppr cc)
-                            let header = "# " ++ unwords ["D" ++ show i ++ ": " ++ show domsize | i <- [0 .. ar - 1]]
-                                tuples = [ unwords $ map (show.ppr) tt
-                                           | Pred _ tt :- [] <- mapTermSymbols toDomain <$$$> cc]
-                            hPutStrLn h $ unlines (header : tuples)
-                            hClose h
-                            return fp
+                              echo ("writing facts for " ++ show name ++ " in file " ++ fp )
+                              debugMsg $ show (vcat $ map ppr cc)
+                              let header = "# " ++ unwords ["D" ++ show i ++ ": " ++ show domsize | i <- [0 .. ar - 1]]
+                                  tuples = [ unwords $ map (show.ppr) tt
+                                             | Pred _ tt :- [] <- mapTermSymbols toDomain <$$$> cc]
+                              hPutStrLn h $ unlines (header : tuples)
+                              hClose h
+                              return fp
          (flip finally (when (not debug) $ mapM_ removeFile toBeDeleted)) $ do
            dump_bddbddb $ unlines $ map show
              [ ppr c <> ppr a <> parens (hsep $ punctuate comma $ replicate a (text "arg : D"))
-                        <+>  text "outputtuples"
+                        <+> ppr (direction c)
                     | (c,aa) <- predicates, a <- toList aa]
 
          -- Rules
@@ -213,7 +225,7 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
              ExitFailure{} -> error ("bddbddb failed with an error")
              ExitSuccess   -> do
               let domArray = listArray (0, domsize) (Set.toList dom)
-                  outpredicates = if debug then predicates else filter (isAnswer . fst) predicates
+                  outpredicates = filter (isOutput . direction . fst) predicates
               results <- forM outpredicates $ \(p,ii) -> liftM concat $ forM (toList ii) $ \i -> do
                            echo ("Processing file " ++ show p ++ show i ++ ".tuples")
                            let fp_result = (takeDirectory fp </> show p ++ show i <.> "tuples")
@@ -237,6 +249,20 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
               go (fp:fps) = do
                 x <- doesFileExist fp
                 if x then return fp else go fps
+
+direction = foldExpr directionF
+class Functor a => DirectionF a where directionF :: a Direction -> Direction
+instance DirectionF QueryAnswer where directionF Answer{} = Output; directionF _ = None
+instance DirectionF AbstractCompile where directionF Denotes{} = Input; directionF _ = None
+instance DirectionF NotAny where directionF NotAny = Input
+instance (DirectionF a, DirectionF b) => DirectionF (a :+: b) where
+    directionF (Inl x) = directionF x
+    directionF (Inr y) = directionF y
+
+instance DirectionF PrologT where directionF _ = None
+instance DirectionF PrologP where directionF _ = None
+instance DirectionF V       where directionF _ = None
+instance DirectionF (T id) where directionF _ = None
 
 class PprBddBddb a where pprBddbddb :: a -> Doc
 instance Ppr (Free f v) => PprBddBddb (Free f v)     where pprBddbddb = ppr

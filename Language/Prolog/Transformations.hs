@@ -6,6 +6,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Language.Prolog.Transformations where
 
@@ -15,7 +16,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.AlaCarte as Al
 import Data.AlaCarte.Ppr
-import Data.Foldable (Foldable, foldMap, toList)
+import Data.Foldable (Foldable(..), toList)
 import Data.List (nubBy, foldl', groupBy, sort, sortBy, elemIndex, (\\))
 import Data.Monoid
 import qualified Data.Map as Map
@@ -23,6 +24,12 @@ import qualified Data.Set as Set
 import qualified Data.Traversable as T
 import Data.Traversable (Traversable, sequenceA)
 import Text.PrettyPrint as Ppr
+import Prelude hiding (foldr)
+
+import Data.DeriveTH
+import Data.Derive.Functor
+import Data.Derive.Foldable
+import Data.Derive.Traversable
 
 import Language.Prolog.Syntax
 import Language.Prolog.Representation
@@ -88,15 +95,6 @@ queryAll     = inject . QueryAll
 query id i j = inject (Query id i j)
 
 isAnswer (Al.match -> Just Answer{}) = True; isAnswer _ = False
-
-instance Functor QueryAnswer where
-    fmap f (Answer id)    = Answer   (f id)
-    fmap f (QueryAll id)  = QueryAll (f id)
-    fmap f (Query id i j) = Query    (f id) i j
-instance PprF QueryAnswer where
-    pprF (Answer   id)  = text "answer_" <> id
-    pprF (QueryAll id)  = text "query_"  <> id
-    pprF (Query id i j) = text "query_"  <> Ppr.int i <> text "_" <> Ppr.int j <> text "_" <> id
 
 {-  Example.
  Original program:
@@ -223,3 +221,12 @@ instance (Enum a, Bounded a, Enum b, Bounded b) => Enum (Either a b) where
 
 -- Bounded instance for Var
 instance Bounded Var where minBound = VAuto minBound; maxBound = VAuto maxBound
+
+$(derive makeFunctor     ''QueryAnswer)
+$(derive makeFoldable    ''QueryAnswer)
+$(derive makeTraversable ''QueryAnswer)
+
+instance PprF QueryAnswer where
+    pprF (Answer   id)  = text "answer_" <> id
+    pprF (QueryAll id)  = text "query_"  <> id
+    pprF (Query id i j) = text "query_"  <> Ppr.int i <> text "_" <> Ppr.int j <> text "_" <> id

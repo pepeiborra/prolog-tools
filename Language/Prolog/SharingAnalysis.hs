@@ -35,7 +35,7 @@ trace _ = id
 type Type id = (id,Int)
 type SharingAssignment id = [Set (Type id)]
 
-infer :: (Ord id, Show id) => Program id -> SharingAssignment id
+infer :: (Ord id, Ppr id) => Program id -> SharingAssignment id
 infer pgm = map fromClass $ fst $ execState (mapM_ typeclause pgm) (a0,mempty) where
    sig = getSignature pgm
    a0  = [ Class(Set.singleton (f,i)) | (f,ar) <- Map.toList (arity sig)
@@ -56,7 +56,7 @@ infer pgm = map fromClass $ fst $ execState (mapM_ typeclause pgm) (a0,mempty) w
     f _ _ = return ()
 
    mergeM typ1 typ2 = modify (first (merge typ1 typ2))
-                      >> get >>= \(cc,_) -> trace (show typ1 ++ " ~ " ++ show typ2 ++ " : " ++ show (map F.toList cc)) (return ())
+--                      >> get >>= \(cc,_) -> trace (showPpr typ1 ++ " ~ " ++ showPpr typ2 ++ " : " ++ showPpr (map F.toList cc)) (return ())
    readVar v        = do {(_,e) <- get; return (Map.lookup v e)}
    bindVar v t      = modify $ second (Map.insert v t)
 

@@ -26,6 +26,7 @@ import Control.Arrow ((***))
 import Control.Exception
 import Control.Monad.Identity(Identity(..))
 import Control.Monad (mplus, filterM, replicateM, liftM, join, when, forM, forM_)
+import Control.Monad.Error(Error(..),MonadError(..), runErrorT)
 import Control.Monad.Free (Free(..), mapFree, foldFree, evalFree, foldFreeM, isPure)
 import Control.Monad.State (StateT, evalState, evalStateT)
 import Control.Monad.Writer (WriterT, runWriter, runWriterT)
@@ -38,7 +39,7 @@ import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Foldable (foldMap, toList, Foldable)
 import qualified Data.Foldable as F
-import Data.List (find, (\\), nub, nubBy, sort, sortBy, groupBy, elemIndex, foldl')
+import Data.List (find, (\\), nub, nubBy, sort, sortBy, group, groupBy, elemIndex, foldl')
 import Data.Maybe
 import Data.Monoid (Sum(..), Monoid(..))
 import Data.Map (Map)
@@ -49,7 +50,7 @@ import qualified Data.Traversable as T
 import Data.Traversable (Traversable(..))
 import Text.PrettyPrint as Ppr
 
-import Data.Term (HasId(..), MapId(..), MonadFresh(..), directSubterms, mapTermSymbols, foldTerm, foldTermM)
+import Data.Term (HasId(..), MapId(..), MonadFresh(..), directSubterms, mapTermSymbols, foldTerm, foldTermM, matches)
 import Data.Term.Rules
 import Data.Term.Var
 import Language.Prolog.Representation
@@ -67,6 +68,8 @@ import System.Process
 
 import Prelude hiding (any, succ, pred)
 import qualified Prelude
+
+import Debug.Trace
 
 -- Types
 -- -----
@@ -127,6 +130,7 @@ data ComputeSuccessPatternsOpts idp as = ComputeSuccessPatternsOpts
     , depth     :: Int
     , verbosity :: Int
     , debug     :: Bool
+    , smart     :: Bool
     , fp        :: FilePath
     , bddbddb_path ::[FilePath]
     }
@@ -136,13 +140,14 @@ computeSuccessPatternsOpts = ComputeSuccessPatternsOpts { mb_goal = Nothing
                                                         , depth   = 1
                                                         , verbosity = 0
                                                         , debug   = False
+                                                        , smart   = False
                                                         , fp      = "tempbddbddb"
                                                         , bddbddb_path = []
                                                         }
 
 computeSuccessPatterns :: forall idp idp' t t' as.
                           (t' ~ Term0 (Expr as) Var, idp' ~ (QueryAnswer :+: idp),
-                           PprF idp, PprF as, Ord (Expr idp'), Ord (Expr as),
+                           PprF idp, PprF as, Ord (Expr idp'), Ord (as(Expr as)), Foldable as,
                            PrologTerm String :<: as, NotVar :<: as, Any :<: as, Compound :<: as,
                            T String :<: idp, PrologP :<: idp,  NotAny :<: idp, DirectionF idp
                            ) =>
@@ -156,7 +161,7 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
                        Just _              -> queryAnswer (prepareProgram pl)
                        Nothing             -> mapPredId (foldExpr (In . Inr)) <$$> prepareProgram pl
              PrologSig constructors predicates0 = getPrologSignature pl'
-             (dom, _, denotes, clauses) = abstractCompileProgram depth pl'
+             (dom, _, denotes, clauses) = if smart then abstractCompileProgramSmart pl' else  abstractCompileProgram depth pl'
              predicates = snub $
                            case getPrologSignature <$> mb_goal' of
                               Just (PrologSig _ pred) -> filter (not.isNotAny.fst) (Map.toList pred) ++ Map.toList predicates0
@@ -334,7 +339,8 @@ abstractCompileProgram depth pl  = (dom, notAnyRules, denoteRules, cc') where
 --   abstract domain including only representants for the patterns appearing in
 --   the left hand sides
 abstractCompileProgramSmart:: forall idt idp var fd d pgmany pgmden pgm.
-                         (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, Ord d, Ord (fd(Expr fd)),
+                         (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, Ord d,
+                          Ord (fd(Expr fd)), PprF fd, Foldable fd,
                          var    ~ Either WildCard Var,
                          pgmany ~ AbstractDatalogProgram  NotAny d,
                          pgmden ~ AbstractDatalogProgram (NotAny :+: AbstractCompile :+: PrologTerm idt) d,
@@ -346,21 +352,55 @@ abstractCompileProgramSmart:: forall idt idp var fd d pgmany pgmden pgm.
 abstractCompileProgramSmart pl = (dom, notAnyRules, denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature pl
   patterns = [ t | Pred _ tt <- concatMap toList pl, t <- tt ]
-  depth    = F.maximum ( 0 : [termDepth t | t <- patterns])
+  depth    = estimateDepth pl
 
   apatterns= concatMap mkAPattern patterns
-  dom      = Set.fromList (any : apatterns)
 
   notAnyRules = [Pred notAny [term0 d] :- [] | d <- Set.toList $ Set.delete any dom]
 
-  -- TODO Fix denoteRules so that all the 'res' values belong to the domain,
-  --      implementing the 'needed patterns' algorithm
-  denoteRules = [      [Pred (denotes (reinject f)) (term0 <$> (args ++ [res])) :- []
-                        | args    <- replicateM a (Set.toList dom)
-                        , let res  = cutId depth $ compound (reinject f) args
-                       ]
-                | (f, aa) <- Map.toList constructors, a <- toList aa
-                ]
+  (dom, denoteRules) = pprTrace (text "\n" <> vcat (map ppr $ toList (dom0 `asTypeOf` dom))) $
+                       fromRight (go dom0)
+   where
+    dom0 = Set.fromList (any : apatterns)
+    go dom = do
+                rules <- runListT $ do
+                     (f, aa) <- l $ Map.toList constructors
+                     a       <- l $ toList aa
+                     runListT $ do
+                       args    <- l $ replicateM a (Set.toList dom)
+                       let res  = compound (reinject f) args
+                       case selectRepr res of
+                              Just res' -> return (Pred (denotes (reinject f)) (term0 <$> (args ++ [res'])) :- [])
+                              Nothing   -> pprTrace (text "Missing a match for symbol" <+> ppr res) $
+                                           lift $ throwError (cutId depth res)
+                return (dom, rules)
+             `catchError` \t -> pprTrace (text "adding" <+> ppr t <+> text "to the domain and restarting.")
+                                (go (Set.insert t dom))
+     where
+       l = ListT . return
+
+       selectRepr t | t `Set.member` dom = Just t
+       selectRepr t@(match -> Just (Compound id _)) =
+           case Map.lookup id domBySizeIndexedByCons of
+            Just pat_groups -> go pat_groups
+            Nothing -> -- pprTrace (text "Warning: selectRepr -" <+> parens (ppr id)) $
+                       Nothing
+         where
+               go [] = -- pprTrace (text "Warning: selectRepr - no more pats " <+> parens (ppr id)) $
+                       Nothing
+               go (pats : rest) = case filter (`amatches` t) pats of
+                                    []  -> go rest
+                                    [x] -> Just x
+                                    _   -> Nothing
+       domBySizeIndexedByCons =
+                ( Map.fromList
+                . map ( (\ tt_groups@( (t:_) : _) -> (exprSymbol t, tt_groups))
+                      . groupBy ((==) `on` exprSize)
+                      . sortBy (flip compare `on` exprSize))
+                . groupBy ( (==) `on` exprSymbol)
+                . toList
+                . Set.delete any)
+                dom
 
   cc' = map ( introduceWildcards
             . runFresh (flattenDupVarsC isLeft)
@@ -372,20 +412,22 @@ abstractCompileProgramSmart pl = (dom, notAnyRules, denoteRules, cc') where
   mkDom 0 = Set.fromList [notvar, any]
   mkDom i = Set.fromList (mkLevel (Set.toList $ mkDom (i-1)))
 
-
 --  mkAPattern :: (Traversable t, HasId t id, T id :<: f, Compound :<: f, Any :<: f, NotVar :<: f) => Free t v -> [Expr f]
   mkAPattern = foldTermM (const [any,notvar]) f where
       f t = return $ compound (maybe (error "mkAPattern") reinject $ getId t) (toList t)
 
-  mkLevel dom = any : [ compound (reinject f) args | (f,ii) <- Map.toList constructors
-                                     , i <- toList ii
-                                     , args <- replicateM i dom]
+  mkLevel dom = any : [ compound (reinject f) args
+                            | (f,ii) <- Map.toList constructors
+                            , i <- toList ii
+                            , args <- replicateM i dom]
 
   cutId 0 t = if isAny t then t else notvar
   cutId i (match -> Just (Compound c tt)) = compound c (cutId (i-1) <$> tt)
   cutId i t = t
 
-  termDepth = foldTerm (const 1) (\tf -> 1 + F.maximum (0 : toList tf))
+  exprSize  = foldExpr f where f tf = 1 + F.sum tf
+  exprSymbol (match -> Just (Compound id _)) = id
+  exprSymbol x = x
 
 
 denoteAndDomainize :: (idp' ~ (AbstractCompile :+: idc :+: idp),
@@ -400,6 +442,13 @@ denoteAndDomainize = fmap2 ids2domain
     ids2domain = mapFree (\t -> case getId t of
                                     Just id | null (toList t) -> T id
                                     _                         -> error "denoteAndDomainize" )
+
+estimateDepth pl = F.maximum ( 0 : [termDepth t | t <- patterns])
+  where
+  patterns = [ t | Pred _ tt <- concatMap toList pl, t <- tt ]
+
+
+termDepth = foldTerm (const 0) f where f tf = 1 + F.maximum (0 : toList tf)
 
 -- ------------
 -- Abstraction
@@ -431,10 +480,10 @@ buildPre :: (Ord id, Ord da, Ppr id, Ppr da) =>
 buildPre (DeltaMany delta, sigma) = fixEq f
  where
  f (qd, delta_d)
-   | tracePpr (text "buildPre " <> parens (ppr qd <> comma <+> ppr delta_d)) False = undefined
+   | pprTrace (text "buildPre " <> parens (ppr qd <> comma <+> ppr delta_d)) False = undefined
    | otherwise      = (mconcat *** mconcat) (unzip new_elems)
    where
-    new_elems = [tracePpr (text "  inserted " <> ppr s <+> text "with f=" <> ppr f <+> text "and cc=" <> ppr cc)
+    new_elems = [pprTrace (text "  inserted " <> ppr s <+> text "with f=" <> ppr f <+> text "and cc=" <> ppr cc)
                  (qd `mappend` Set.singleton s, Map.insert (f,cc) s delta_d)
                   | (f,nn)  <- Map.toList sigma
                   , n <- toList nn
@@ -444,9 +493,23 @@ buildPre (DeltaMany delta, sigma) = fixEq f
                   , not (Set.null s)
                 ]
 
+-- --------------
+-- Abstract match
+-- --------------
+-- Match terms by shape, any matches anything.
+amatches (isNotvar -> True) t = not (isAny t)
+amatches (isAny    -> True) t = isAny t
+amatches (match -> Just (Compound id tt)) (match -> Just (Compound id' tt'))
+  = id == id' && length tt == length tt' && and (zipWith amatches tt tt')
+amatches _ _ = False
+
 -- -----
 -- Stuff
 -- -----
+instance Error (Expr f) -- Abusing the Either Monad to escape a computation
+
+fromRight (Right x) = x
+
 prepareProgram :: (T idp :<: pf, PrologP :<: pf, var ~ Var) => Program'' idp (Term' idt var) -> Program'' (Expr pf) (TermR' idt var)
 prepareProgram = runIdentity . mapM3 (foldTermM (return2 . Right)
                                                 (representTerm term1 (return wildCard)))
@@ -479,4 +542,4 @@ instance (Ord id, Ord da) => Monoid (DeltaMany id da) where
 instance PprF f => Ppr (Expr f) where ppr = foldExpr pprF
 instance PprF f =>Show (Expr f) where show = show . ppr
 
-tracePpr msg = id -- trace (render msg)
+pprTrace msg = trace (render msg)

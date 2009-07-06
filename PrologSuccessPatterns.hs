@@ -107,7 +107,7 @@ run_bddbddb Opts{..} = do
   let mb_goal' = uncurry abstractCompileGoal <$> mb_goal
   let opts :: ComputeSuccessPatternsOpts P A
       opts =  ComputeSuccessPatternsOpts{depth, verbosity, debug, fp = problemFile
-                                         ,bddbddb_path, mb_goal = mb_goal', pl}
+                                         ,bddbddb_path, mb_goal = mb_goal', pl, smart}
   (dom, results) <- computeSuccessPatterns opts
   echo "bddbddb produced the following success patterns:\n"
   print (vcat $ map ppr $ concat results)
@@ -166,6 +166,7 @@ data Opts = Opts  { classpath :: [String]
                   , verbosity :: Int
                   , debug     :: Bool
                   , simplify  :: Bool
+                  , smart     :: Bool
                   }
 
 defOpts = Opts { classpath    = []
@@ -176,6 +177,7 @@ defOpts = Opts { classpath    = []
                , verbosity    = 1
                , debug        = False
                , simplify     = False
+               , smart        = False
                , depth        = 1
                }
 
@@ -204,10 +206,11 @@ opts = [ Option "" ["bddbddb"]         (ReqArg setBddbddb "PATH") "Path to the b
        , Option "" ["cp","classpath"]  (ReqArg setCP "PATHS")     "Additional classpath for the Java VM"
        , Option "b" [] (NoArg (\opts -> return opts{mode=Bddbddb}))  "Use bddbddb to compute the approximation (DEFAULT)"
        , Option "f" [] (NoArg (\opts -> return opts{mode=Fixpoint})) "Solve the fixpoint equation to compute the approximation (slower)"
-       , Option "" ["nogoals","bottomup"] (NoArg setNogoals)     "Ignore any goals and force a bottom-up analysis"
+       , Option ""  ["nogoals","bottomup"] (NoArg setNogoals)     "Ignore any goals and force a bottom-up analysis"
        , Option "v" ["verbose"] (OptArg setVB "0-2") "Set verbosity level (default: 1)"
        , Option ""  ["debug"] (NoArg (\opts -> return opts{THIS.debug=True})) "Do not delete intermediate files"
-       , Option "s"  ["simplify"] (NoArg (\opts -> return opts{THIS.simplify=True})) "Simplify the patterns returned"
+       , Option "s" ["simplify"] (NoArg (\opts -> return opts{THIS.simplify=True})) "Simplify the patterns returned"
+       , Option ""  ["smart"] (NoArg (\opts -> return opts{THIS.smart=True})) "Be smart by creating a custom abstract domain"
        , Option "h?" ["help"] (NoArg $ \_ -> putStrLn (usageInfo usage opts) >> exitSuccess) "Displays this help screen"
        ]
 

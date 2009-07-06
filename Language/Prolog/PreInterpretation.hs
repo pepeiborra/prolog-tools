@@ -35,6 +35,7 @@ import Control.Monad.List (ListT(..), runListT)
 import Data.AlaCarte.Ppr
 import Data.Array
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Foldable (foldMap, toList, Foldable)
 import qualified Data.Foldable as F
 import Data.List (find, (\\), nub, nubBy, sort, sortBy, groupBy, elemIndex, foldl')
@@ -194,10 +195,11 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
                             withTempFile' False (takeDirectory fp) (show name ++ ".tuples") $ \fp h -> do
                               echo ("writing facts for " ++ show name ++ " in file " ++ fp )
                               debugMsg $ show (vcat $ map ppr cc)
-                              let header = "# " ++ unwords ["D" ++ show i ++ ": " ++ show domsize | i <- [0 .. ar - 1]]
-                                  tuples = [ unwords $ map (show.ppr) tt
+                              let header = BSL.pack ("# " ++ unwords ["D" ++ show i ++ ": " ++ show domsize | i <- [0 .. ar - 1]])
+                                  tuples = [ BSL.pack (unwords $ map (show.ppr) tt)
                                              | Pred _ tt :- [] <- mapTermSymbols toDomain <$$$> cc]
-                              hPutStrLn h $ unlines (header : tuples)
+                              BSL.hPut h $ BSL.unlines (header : tuples)
+                              BSL.hPut h (BSL.singleton '\n')
                               hClose h
                               return fp
          (flip finally (when (not debug) $ mapM_ removeFile toBeDeleted)) $ do

@@ -49,7 +49,7 @@ import qualified Data.Traversable as T
 import Data.Traversable (Traversable(..))
 import Text.PrettyPrint as Ppr
 
-import Data.Term (HasId(..), MapId(..), MonadFresh(..), directSubterms, mapTermSymbols, foldTermM)
+import Data.Term (HasId(..), MapId(..), MonadFresh(..), directSubterms, mapTermSymbols, foldTerm, foldTermM)
 import Data.Term.Rules
 import Data.Term.Var
 import Language.Prolog.Representation
@@ -297,51 +297,37 @@ abstractCompileProgram :: forall idt idp var fd d pgmany pgmden pgm.
                          Int                                -- ^ Depth of the Preinterpretation used
                       ->  Program'' (Expr idp) (TermR idt)  -- ^ Original Program
                       -> (Set d, pgmany, [pgmden], pgm)          -- ^ (domain, notAny, denotes, program)
-{-
-abstractCompileProgram  0 pl = (dom, [], denoteRules, cc') where
+
+abstractCompileProgram depth pl  = (dom, notAnyRules, denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature pl
-  dom         = [any, notvar]
-  denoteRules = [Pred (denotes f) (map term0 args ++ [term0 res]) :- []
-                | (f, aa) <- Map.toList constructors
-                , a       <- toList aa
-                , args    <- replicateM a [any, notvar]
-                , let res = notvar --if all isStatic args then static else notvar
-                ]
-  cc' = map ( introduceWildcards
-            . runFresh (flattenDupVarsC isLeft)
-            . denoteAndDomainize reinject
-            . fmap (mapPredId reinject)
-            ) pl
+  dom = mkDom depth
 
+  notAnyRules = [Pred notAny [term0 d] :- [] | d <- Set.toList $ Set.delete any dom]
 
-abstractCompileProgram 1 pl = (Set.fromList dom, notanyRules, denoteRules, cc') where
-  PrologSig constructors _ = getPrologSignature pl
-  dom = any : [ compound (reinject f) args | (f,ii) <- Map.toList constructors
-                                     , i <- toList ii
-                                     , args <- replicateM i [notvar, any]
-                                     ]
-  notanyRules = [Pred notAny [term0 d] :- [] | d <- tail dom]
-
-  denoteRules = [ [Pred (denotes (reinject f)) (args ++ [term0 res]) :- notany_vars
-                  | groundness <- [0..2^a - 1]
-                  , let bits = reverse $ take a (reverse(dec2bin groundness) ++ repeat False)
-                  , let args = zipWith (\isnotvar v -> if isnotvar then v else term0 any) bits vars
-                  , let res  = compound (reinject f) ((notvar?:any) <$> bits)
-                  , let notany_vars = [Pred notAny [v] | (True,v) <- zip bits vars]
-                  ]
+  denoteRules = [      [Pred (denotes (reinject f)) (term0 <$> (args ++ [res])) :- []
+                        | args    <- replicateM a (Set.toList dom)
+                        , let res  = cutId depth $ compound (reinject f) args
+                       ]
                 | (f, aa) <- Map.toList constructors, a <- toList aa
                 ]
-
-  vars = (return . Right . VAuto) <$> [0..]
 
   cc' = map ( introduceWildcards
             . runFresh (flattenDupVarsC isLeft)
             . fmap2 (mapTermSymbols reinject)
             . denoteAndDomainize
             ) pl
--}
 
-abstractCompileProgram depth pl  = (dom, notAnyRules, denoteRules, cc') where
+  mkDom :: Int -> Set(Expr fd)
+  mkDom 0 = Set.fromList [notvar, any]
+  mkDom i = Set.fromList (mkLevel (Set.toList $ mkDom (i-1)))
+
+  mkLevel dom = any : [ compound (reinject f) args | (f,ii) <- Map.toList constructors
+                                     , i <- toList ii
+                                     , args <- replicateM i dom]
+
+  cutId 0 t = if isAny t then t else notvar
+  cutId i (match -> Just (Compound c tt)) = compound c (cutId (i-1) <$> tt)
+  cutId i t = t
   PrologSig constructors _ = getPrologSignature pl
   dom = mkDom depth
 

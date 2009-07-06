@@ -328,11 +328,33 @@ abstractCompileProgram depth pl  = (dom, notAnyRules, denoteRules, cc') where
   cutId 0 t = if isAny t then t else notvar
   cutId i (match -> Just (Compound c tt)) = compound c (cutId (i-1) <$> tt)
   cutId i t = t
+
+
+-- | Smarter version. Auto calculates the required depth and generates a tweaked
+--   abstract domain including only representants for the patterns appearing in
+--   the left hand sides
+abstractCompileProgramSmart:: forall idt idp var fd d pgmany pgmden pgm.
+                         (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, Ord d, Ord (fd(Expr fd)),
+                         var    ~ Either WildCard Var,
+                         pgmany ~ AbstractDatalogProgram  NotAny d,
+                         pgmden ~ AbstractDatalogProgram (NotAny :+: AbstractCompile :+: PrologTerm idt) d,
+                         pgm    ~ AbstractDatalogProgram (AbstractCompile :+: PrologTerm idt :+: idp) d,
+                         d      ~ (Expr fd),
+                         PrologTerm idt :<: fd, Any :<: fd, NotVar :<: fd, Compound :<: fd) =>
+                         Program'' (Expr idp) (TermR idt)  -> (Set d, pgmany, [pgmden], pgm)
+
+abstractCompileProgramSmart pl = (dom, notAnyRules, denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature pl
-  dom = mkDom depth
+  patterns = [ t | Pred _ tt <- concatMap toList pl, t <- tt ]
+  depth    = F.maximum ( 0 : [termDepth t | t <- patterns])
+
+  apatterns= concatMap mkAPattern patterns
+  dom      = Set.fromList (any : apatterns)
 
   notAnyRules = [Pred notAny [term0 d] :- [] | d <- Set.toList $ Set.delete any dom]
 
+  -- TODO Fix denoteRules so that all the 'res' values belong to the domain,
+  --      implementing the 'needed patterns' algorithm
   denoteRules = [      [Pred (denotes (reinject f)) (term0 <$> (args ++ [res])) :- []
                         | args    <- replicateM a (Set.toList dom)
                         , let res  = cutId depth $ compound (reinject f) args
@@ -350,6 +372,11 @@ abstractCompileProgram depth pl  = (dom, notAnyRules, denoteRules, cc') where
   mkDom 0 = Set.fromList [notvar, any]
   mkDom i = Set.fromList (mkLevel (Set.toList $ mkDom (i-1)))
 
+
+--  mkAPattern :: (Traversable t, HasId t id, T id :<: f, Compound :<: f, Any :<: f, NotVar :<: f) => Free t v -> [Expr f]
+  mkAPattern = foldTermM (const [any,notvar]) f where
+      f t = return $ compound (maybe (error "mkAPattern") reinject $ getId t) (toList t)
+
   mkLevel dom = any : [ compound (reinject f) args | (f,ii) <- Map.toList constructors
                                      , i <- toList ii
                                      , args <- replicateM i dom]
@@ -357,6 +384,8 @@ abstractCompileProgram depth pl  = (dom, notAnyRules, denoteRules, cc') where
   cutId 0 t = if isAny t then t else notvar
   cutId i (match -> Just (Compound c tt)) = compound c (cutId (i-1) <$> tt)
   cutId i t = t
+
+  termDepth = foldTerm (const 1) (\tf -> 1 + F.maximum (0 : toList tf))
 
 
 denoteAndDomainize :: (idp' ~ (AbstractCompile :+: idc :+: idp),

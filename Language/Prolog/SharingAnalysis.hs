@@ -35,12 +35,12 @@ trace _ = id
 type Type id = (id,Int)
 type SharingAssignment id = [Set (Type id)]
 
-infer :: (Ord id, Ppr id) => Program id -> SharingAssignment id
+infer :: (Ord id, Pretty id) => Program id -> SharingAssignment id
 infer pgm = map fromClass $ fst $ execState (mapM_ typeclause pgm) (a0,mempty) where
    sig = getSignature pgm
-   a0  = [ Class(Set.singleton (f,i)) | (f,ar) <- Map.toList (arity sig)
-                                      , let j = if f `Set.member` constructorSymbols sig then 0 else 1
-                                      , i <- [j..getArity sig f]]
+   a0  = [ Class(Set.singleton (f,i)) | (f,ar) <- Map.toList (getArities sig)
+                                      , let j = if f `Set.member` getConstructorSymbols sig then 0 else 1
+                                      , i <- [j..ar]]
    typeclause (l:-r)    = typePred l >> mapM_ typePred r >> modify (second (const mempty))
    typePred (Pred f tt) = sequence_ [typeTerm t (f,i) | (t,i) <- tt `zip` [1..]]
    typePred _ = return ()

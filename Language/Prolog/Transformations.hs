@@ -23,7 +23,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Traversable as T
 import Data.Traversable (Traversable, sequenceA)
-import Text.PrettyPrint as Ppr
+import Text.PrettyPrint.HughesPJClass as Ppr
 import Prelude hiding (foldr)
 
 import Data.DeriveTH

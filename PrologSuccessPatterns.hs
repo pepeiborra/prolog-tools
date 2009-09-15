@@ -48,7 +48,7 @@ import System.Cmd
 import System.FilePath
 import Text.ParserCombinators.Parsec (Parser, ParseError, getState, setState, runParser, parseFromFile, parse, oneOf)
 import qualified Text.ParserCombinators.Parsec as Parsec
-import Text.PrettyPrint hiding (Mode(..),mode)
+import Text.PrettyPrint.HughesPJClass hiding (Mode(..),mode)
 
 import qualified Prelude
 import Prelude hiding (pred, any, or)
@@ -82,16 +82,16 @@ main = do
     ["dfta"] -> do
          let ((dom,_), pl0) = getAbstractComp mkPre pl
          echo "We compute the following compiled abstraction:"
-         print (ppr pl0)
+         print (pPrint pl0)
 --         echo "the Preinterpretation domain is: "
---         print (ppr dom)
+--         print (pPrint dom)
     ["cooked"] -> do
          let pl' = prepareProgram pl
          echo "We compute the following (cooked) compiled abstraction:"
          let (pre@(dom',_), pl') = getCookedAbstractComp pl
-         print (ppr pl')
+         print (pPrint pl')
 --         echo "the Preinterpretation domain is: "
---         print (ppr dom')
+--         print (pPrint dom')
     ["success","cooked"] -> do
          echo "We obtain the (cooked) success patterns:"
          print (getCookedSuccessPatterns' pl)
@@ -110,12 +110,12 @@ run_bddbddb Opts{..} = do
                                          ,bddbddb_path, mb_goal = mb_goal', pl, smart}
   (dom, results) <- computeSuccessPatterns opts
   echo "bddbddb produced the following success patterns:\n"
-  print (vcat $ map ppr $ concat results)
+  print (vcat $ map pPrint $ concat results)
   when simplify $ do
     echo " \nWe can simplify the patterns as follows:\n"
 --  let zipped_results = abstract (term0 <$> dom) <$> results
     let zipped_results = abstractAnys any <$> results
-    print (vcat $ map ppr $ concat zipped_results)
+    print (vcat $ map pPrint $ concat zipped_results)
 
 -- ---------------
 

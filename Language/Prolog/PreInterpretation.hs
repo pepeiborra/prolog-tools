@@ -48,7 +48,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Traversable as T
 import Data.Traversable (Traversable(..))
-import Text.PrettyPrint as Ppr
+import Text.PrettyPrint.HughesPJClass as Ppr
 
 import Data.Term (HasId(..), MapId(..), MonadFresh(..), directSubterms, mapTermSymbols, foldTerm, foldTermM, matches)
 import Data.Term.Rules
@@ -105,8 +105,8 @@ newtype DeltaMany id da = DeltaMany {deltaMany::Map (id, [da]) [da]} deriving Sh
 
 type ClauseAssignment term d = forall idp var. Ord var => Clause'' idp (Free term var)  -> [Clause'' idp d]
 
-instance (Ppr idp, Ppr term) => Ppr  (Interpretation idp term) where ppr  = vcat . map ppr . Set.toList . interpretation
-instance (Ppr idp, Ppr term) => Show (Interpretation idp term) where show = show . ppr
+instance (Pretty idp, Pretty term) => Pretty  (Interpretation idp term) where pPrint  = vcat . map pPrint . Set.toList . interpretation
+instance (Pretty idp, Pretty term) => Show (Interpretation idp term) where show = show . pPrint
 mkI = I . Set.fromList
 liftI f (I i) = I (f i)
 
@@ -122,7 +122,7 @@ instance Show Direction where
   show Output = "outputtuples"
   show None   = ""
 
-instance Ppr Direction where ppr = text . show
+instance Pretty Direction where pPrint = text . show
 
 data ComputeSuccessPatternsOpts idp as = ComputeSuccessPatternsOpts
     { mb_goal   :: Maybe (Clause'' (Expr idp) (DatalogTerm (Expr as)))
@@ -170,7 +170,7 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
          withTempFile (not debug) "." (fp++".bddbddb") $ \fpbddbddb hbddbddb -> do
 
          -- Domain
-         echo ("The domain is: " ++ show (ppr dom))
+         echo ("The domain is: " ++ show (pPrint dom))
          withTempFile (not debug) "." (fp++".map") $ \fpmap hmap -> do
          let dump_bddbddb txt = hPutStrLn hbddbddb txt >> echo txt
 
@@ -178,7 +178,7 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
          dump_bddbddb "### Domains"
          let domsize = Set.size dom
          dump_bddbddb ("D " ++ show domsize ++ " " ++ takeFileName fpmap)
-         hPutStrLn hmap (show (vcat $ map (ppr) $ Set.toList dom))
+         hPutStrLn hmap (show (vcat $ map (pPrint) $ Set.toList dom))
          hClose hmap
          -- Relations
          dump_bddbddb "\n### Relations\n"
@@ -190,18 +190,18 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
          hClose notanyh
          let domainDict = Map.fromList (Set.toList dom `zip` [(0::Int)..])
              toDomain f | Just i <- Map.lookup f domainDict = i
-                        | otherwise = error ("Symbol not in domain: " ++ show (ppr f))
+                        | otherwise = error ("Symbol not in domain: " ++ show (pPrint f))
 
-         toBeDeleted <- forM (filter (isInput.direction.pred.cHead) <$> denotes) $
+         toBeDeleted <- forM (filter (isInput.direction debug.pred.cHead) <$> denotes) $
                           \cc@(Pred cons@(match -> Just Denotes{}) (length -> ar) :- [] : _) -> do
-                            let name = ppr cons <> ppr ar
+                            let name = pPrint cons <> pPrint ar
                             dump_bddbddb $ show (name <> parens (hsep $ punctuate comma $ replicate ar (text "arg : D"))
-                                                    <+> ppr (direction cons))
+                                                    <+> pPrint (direction debug cons))
                             withTempFile' False (takeDirectory fp) (show name ++ ".tuples") $ \fp h -> do
                               echo ("writing facts for " ++ show name ++ " in file " ++ fp )
-                              debugMsg $ show (vcat $ map ppr cc)
+                              debugMsg $ show (vcat $ map pPrint cc)
                               let header = BSL.pack ("# " ++ unwords ["D" ++ show i ++ ": " ++ show domsize | i <- [0 .. ar - 1]])
-                                  tuples = [ BSL.pack (unwords $ map (show.ppr) tt)
+                                  tuples = [ BSL.pack (unwords $ map (show.pPrint) tt)
                                              | Pred _ tt :- [] <- mapTermSymbols toDomain <$$$> cc]
                               BSL.hPut h $ BSL.unlines (header : tuples)
                               BSL.hPut h (BSL.singleton '\n')
@@ -209,8 +209,8 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
                               return fp
          (flip finally (when (not debug) $ mapM_ removeFile toBeDeleted)) $ do
            dump_bddbddb $ unlines $ map show
-             [ ppr c <> ppr a <> parens (hsep $ punctuate comma $ replicate a (text "arg : D"))
-                        <+> ppr (direction c)
+             [ pPrint c <> pPrint a <> parens (hsep $ punctuate comma $ replicate a (text "arg : D"))
+                        <+> pPrint (direction debug c)
                     | (c,aa) <- predicates, a <- toList aa]
 
          -- Rules
@@ -224,8 +224,8 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
          -- Running bddbddb
            hClose hbddbddb
            hClose hmap
-           let cmdline = if verbosity>1 then ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb)
-                                        else ("java -jar " ++ bddbddb_jar ++ " " ++ fpbddbddb ++ "> /dev/null 2> /dev/null")
+           let cmdline = if verbosity>1 then ("java -jar -Xmx1024m " ++ bddbddb_jar ++ " " ++ fpbddbddb)
+                                        else ("java -jar -Xmx1024m " ++ bddbddb_jar ++ " " ++ fpbddbddb ++ "> /dev/null 2> /dev/null")
            echo ("\nCalling bddbddb with command line: " ++ cmdline ++ "\n")
            exitcode <- system cmdline
 
@@ -233,7 +233,7 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
              ExitFailure{} -> error ("bddbddb failed with an error")
              ExitSuccess   -> do
               let domArray = listArray (0, domsize) (Set.toList dom)
-                  outpredicates = filter (isOutput . direction . fst) predicates
+                  outpredicates = filter (isOutput . direction debug . fst) predicates
               results <- forM outpredicates $ \(p,ii) -> liftM concat $ forM (toList ii) $ \i -> do
                            echo ("Processing file " ++ show p ++ show i ++ ".tuples")
                            let fp_result = (takeDirectory fp </> show p ++ show i <.> "tuples")
@@ -258,28 +258,28 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
                 x <- doesFileExist fp
                 if x then return fp else go fps
 
-direction = foldExpr directionF
-class Functor a => DirectionF a where directionF :: a Direction -> Direction
-instance DirectionF QueryAnswer where directionF Answer{} = Output; directionF _ = None
-instance DirectionF AbstractCompile where directionF Denotes{} = Input; directionF _ = None
-instance DirectionF NotAny where directionF NotAny = Input
+direction debug = foldExpr (directionF debug)
+class Functor a => DirectionF a where directionF :: Bool -> a Direction -> Direction
+instance DirectionF QueryAnswer where directionF _ Answer{} = Output; directionF True QueryAll{} = Output; directionF _ _ = None
+instance DirectionF AbstractCompile where directionF _ Denotes{} = Input; directionF _ _ = None
+instance DirectionF NotAny where directionF _ NotAny = Input
 instance (DirectionF a, DirectionF b) => DirectionF (a :+: b) where
-    directionF (Inl x) = directionF x
-    directionF (Inr y) = directionF y
+    directionF d (Inl x) = directionF d x
+    directionF d (Inr y) = directionF d y
 
-instance DirectionF PrologT where directionF _ = None
-instance DirectionF PrologP where directionF _ = None
-instance DirectionF V       where directionF _ = None
-instance DirectionF (T id) where directionF _ = None
+instance DirectionF PrologT where directionF _ _ = None
+instance DirectionF PrologP where directionF _ _ = None
+instance DirectionF V       where directionF _ _ = None
+instance DirectionF (T id)  where directionF _ _ = None
 
 class PprBddBddb a where pprBddbddb :: a -> Doc
-instance Ppr (Free f v) => PprBddBddb (Free f v)     where pprBddbddb = ppr
+instance Pretty (Free f v) => PprBddBddb (Free f v)     where pprBddbddb = pPrint
 instance PprBddBddb a => PprBddBddb (ClauseF  a) where
     pprBddbddb (a :- []) = pprBddbddb a <> text "."
     pprBddbddb (a :- aa) = pprBddbddb a <+> text ":-" <+> hcat (punctuate comma $ map pprBddbddb aa) <> text "."
-instance (Ppr id, Ppr a) => PprBddBddb (GoalF id a) where
-    pprBddbddb (Pred p args) = ppr (Pred (ppr p <> Ppr.int (length args)) args)
-    pprBddbddb p = ppr p
+instance (Pretty id, Pretty a) => PprBddBddb (GoalF id a) where
+    pprBddbddb (Pred p args) = pPrint (Pred (pPrint p <> Ppr.int (length args)) args)
+    pprBddbddb p = pPrint p
 instance PprBddBddb (ClauseF a) => PprBddBddb [ClauseF a] where pprBddbddb = vcat . map pprBddbddb
 
 -- ----------------------
@@ -287,12 +287,14 @@ instance PprBddBddb (ClauseF a) => PprBddBddb [ClauseF a] where pprBddbddb = vca
 -- ----------------------
 type Abstract = NotVar :+: Any :+: Compound
 
+data DefaultMode = S | A | N deriving (Eq, Show)
+
 abstractCompileGoal :: (NotAny :<: pf, T String :<: pf, Monad m, Enum v) => String -> [Bool] -> Clause'' (Expr pf) (m v)
 abstractCompileGoal f ii = Pred (mkT f) (take (length ii) vars) :- [ Pred notAny [v]| (False,v) <- zip ii vars]
   where vars = return <$> [toEnum 0 .. ]
 
 abstractCompileProgram :: forall idt idp var fd d pgmany pgmden pgm.
-                         (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, Ord d,
+                         (Ord idt, Pretty idt, Ord (Expr idp), PprF idp, Ord d,
                          var    ~ Either WildCard Var,
                          pgmany ~ AbstractDatalogProgram  NotAny d,
                          pgmden ~ AbstractDatalogProgram (NotAny :+: AbstractCompile :+: PrologTerm idt) d,
@@ -300,10 +302,11 @@ abstractCompileProgram :: forall idt idp var fd d pgmany pgmden pgm.
                          d      ~ (Expr fd),
                          PrologTerm idt :<: fd, Any :<: fd, NotVar :<: fd, Compound :<: fd) =>
                          Int                                -- ^ Depth of the Preinterpretation used
+--                      -> [DefaultMode]
                       ->  Program'' (Expr idp) (TermR idt)  -- ^ Original Program
                       -> (Set d, pgmany, [pgmden], pgm)          -- ^ (domain, notAny, denotes, program)
 
-abstractCompileProgram depth pl  = (dom, notAnyRules, denoteRules, cc') where
+abstractCompileProgram depth pl = (dom, notAnyRules, denoteRules, cc') where
   PrologSig constructors _ = getPrologSignature pl
   dom = mkDom depth
 
@@ -339,7 +342,7 @@ abstractCompileProgram depth pl  = (dom, notAnyRules, denoteRules, cc') where
 --   abstract domain including only representants for the patterns appearing in
 --   the left hand sides
 abstractCompileProgramSmart:: forall idt idp var fd d pgmany pgmden pgm.
-                         (Ord idt, Ppr idt, Ord (Expr idp), PprF idp, Ord d,
+                         (Ord idt, Pretty idt, Ord (Expr idp), PprF idp, Ord d,
                           Ord (fd(Expr fd)), PprF fd, Foldable fd,
                          var    ~ Either WildCard Var,
                          pgmany ~ AbstractDatalogProgram  NotAny d,
@@ -358,7 +361,7 @@ abstractCompileProgramSmart pl = (dom, notAnyRules, denoteRules, cc') where
 
   notAnyRules = [Pred notAny [term0 d] :- [] | d <- Set.toList $ Set.delete any dom]
 
-  (dom, denoteRules) = pprTrace (text "\n" <> vcat (map ppr $ toList (dom0 `asTypeOf` dom))) $
+  (dom, denoteRules) = pprTrace (text "\n" <> vcat (map pPrint $ toList (dom0 `asTypeOf` dom))) $
                        fromRight (go dom0)
    where
     dom0 = Set.fromList (any : apatterns)
@@ -371,10 +374,10 @@ abstractCompileProgramSmart pl = (dom, notAnyRules, denoteRules, cc') where
                        let res  = compound (reinject f) args
                        case selectRepr res of
                               Just res' -> return (Pred (denotes (reinject f)) (term0 <$> (args ++ [res'])) :- [])
-                              Nothing   -> pprTrace (text "Missing a match for symbol" <+> ppr res) $
+                              Nothing   -> pprTrace (text "Missing a match for symbol" <+> pPrint res) $
                                            lift $ throwError (cutId depth res)
                 return (dom, rules)
-             `catchError` \t -> pprTrace (text "adding" <+> ppr t <+> text "to the domain and restarting.")
+             `catchError` \t -> pprTrace (text "adding" <+> pPrint t <+> text "to the domain and restarting.")
                                 (go (Set.insert t dom))
      where
        l = ListT . return
@@ -386,7 +389,7 @@ abstractCompileProgramSmart pl = (dom, notAnyRules, denoteRules, cc') where
             Nothing -> -- pprTrace (text "Warning: selectRepr -" <+> parens (ppr id)) $
                        Nothing
          where
-               go [] = -- pprTrace (text "Warning: selectRepr - no more pats " <+> parens (ppr id)) $
+               go [] = -- pprTrace (text "Warning: selectRepr - no more pats " <+> parens (pPrint id)) $
                        Nothing
                go (pats : rest) = case filter (`amatches` t) pats of
                                     []  -> go rest
@@ -431,7 +434,7 @@ abstractCompileProgramSmart pl = (dom, notAnyRules, denoteRules, cc') where
 
 
 denoteAndDomainize :: (idp' ~ (AbstractCompile :+: idc :+: idp),
-                       Functor idc, Functor idp, HasId t (Expr idc), Traversable t, Ord v, Enum v) =>
+                       Functor idc, Functor idp, HasId t, TermId t ~ Expr idc, Traversable t, Ord v, Enum v) =>
                       Clause'' (Expr idp) (Free t v) -> Clause'' (Expr idp') (Term0 (Expr idc) v)
 -- Manual resolution of injections, to avoid introducing more constraints
 denoteAndDomainize = fmap2 ids2domain
@@ -475,15 +478,15 @@ pre0var = (Set.singleton (Set.singleton mkV), Map.singleton (mkV,[])
                                                          (Set.singleton mkV))
 
 -- | Completes a preinterpretation from a Delta function and a signature
-buildPre :: (Ord id, Ord da, Ppr id, Ppr da) =>
+buildPre :: (Ord id, Ord da, Pretty id, Pretty da) =>
             (DeltaMany id da, Arity id) -> PreInterpretationSet' id da -> PreInterpretationSet' id da
 buildPre (DeltaMany delta, sigma) = fixEq f
  where
  f (qd, delta_d)
-   | pprTrace (text "buildPre " <> parens (ppr qd <> comma <+> ppr delta_d)) False = undefined
+   | pprTrace (text "buildPre " <> parens (pPrint qd <> comma <+> pPrint delta_d)) False = undefined
    | otherwise      = (mconcat *** mconcat) (unzip new_elems)
    where
-    new_elems = [pprTrace (text "  inserted " <> ppr s <+> text "with f=" <> ppr f <+> text "and cc=" <> ppr cc)
+    new_elems = [pprTrace (text "  inserted " <> pPrint s <+> text "with f=" <> pPrint f <+> text "and cc=" <> pPrint cc)
                  (qd `mappend` Set.singleton s, Map.insert (f,cc) s delta_d)
                   | (f,nn)  <- Map.toList sigma
                   , n <- toList nn
@@ -516,7 +519,7 @@ prepareProgram = runIdentity . mapM3 (foldTermM (return2 . Right)
                              . fmap2 representPred
                              . addBuiltInPredicates
 
-deriving instance (Ppr id, Ppr [da]) => Ppr (DeltaMany id da)
+deriving instance (Pretty id, Pretty [da]) => Pretty (DeltaMany id da)
 
 runFresh m c  = m c `evalState` ([toEnum 1..] \\ Set.toList (getVars c))
 
@@ -539,7 +542,7 @@ instance (Ord id, Ord da) => Monoid (DeltaMany id da) where
   DeltaMany m1 `mappend` DeltaMany m2 = DeltaMany $ Map.unionWith (++) m1 m2
 
 
-instance PprF f => Ppr (Expr f) where ppr = foldExpr pprF
-instance PprF f =>Show (Expr f) where show = show . ppr
+instance PprF f => Pretty (Expr f) where pPrint = foldExpr pprF
+instance PprF f =>Show (Expr f) where show = show . pPrint
 
 pprTrace msg = trace (render msg)

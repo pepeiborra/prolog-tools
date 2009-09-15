@@ -27,8 +27,8 @@ getPrologSignature cc =  PrologSig aritiesF aritiesP where
     aritiesP = Map.fromListWith mappend [ (f, Set.singleton (length tt)) | Pred f tt   <- F.toList =<< cc]
     aritiesF = Map.fromListWith mappend [ (f, Set.singleton (length tt)) | Pred _ args <- F.toList =<< cc, Impure(Term f tt) <- subterms =<< args ]
 -}
-getPrologSignature :: (Ord idp, Ord idt, HasId termF idt, Foldable termF) =>
-                      Program'' idp (Free termF var) -> PrologSignature idp idt
+getPrologSignature :: (Ord idp, HasId termF, Foldable termF) =>
+                      Program'' idp (Free termF var) -> PrologSignature idp (TermId termF)
 
 getPrologSignature cc =  PrologSig aritiesF aritiesP where
     aritiesP = Map.fromListWith mappend [ (f, Set.singleton(length tt)) | Pred f tt   <- F.toList =<< cc]

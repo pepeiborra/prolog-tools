@@ -10,7 +10,7 @@ import Language.Prolog.Syntax as Prolog
 import Language.Prolog.Signature
 import System.Environment
 import Text.ParserCombinators.Parsec
-import Text.PrettyPrint (text)
+import Text.PrettyPrint.HughesPJClass (text)
 
 import Data.Term.Rules
 
@@ -21,8 +21,8 @@ main = do
    contents <- readFile fp
    case translate fp contents of
      Left err -> error err
-     Right (pgm, goal) -> putStrLn (show(ppr pgm) ++
-                                    "\n%query: " ++ show (ppr goal) ++ "\n")
+     Right (pgm, goal) -> putStrLn (show(pPrint pgm) ++
+                                    "\n%query: " ++ show (pPrint goal) ++ "\n")
 
 translate :: FilePath -> String -> Either String (Program String, TermF String Mode)
 translate fp txt = do
@@ -59,13 +59,13 @@ translate fp txt = do
             return (pgm', goal')
         _ -> fail "Expected one and only one query"
   where
-        goalToGoal (Prolog.Pred f tt) = Term f <$> (parse modesP "" $ unwords $ map (show . ppr) $ tt)
+        goalToGoal (Prolog.Pred f tt) = Term f <$> (parse modesP "" $ unwords $ map (show . pPrint) $ tt)
 
 isCut Cut = True; isCut _ = False
 
 data Mode = G|V
 instance Show Mode where show G = "b"; show V = "f"
-instance Ppr Mode where ppr = text . show
+instance Pretty Mode where pPrint = text . show
 
 --parseGoal :: String -> Either ParseError Goal
 parseGoal = parse p "" where

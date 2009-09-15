@@ -2,6 +2,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-overlapping-patterns #-}
 
@@ -18,7 +19,7 @@ import Data.Traversable
 import qualified Data.Set as Set
 import Language.Haskell.TH (runIO)
 import Text.ParserCombinators.Parsec (parse)
-import Text.PrettyPrint as Ppr
+import Text.PrettyPrint.HughesPJClass as Ppr
 import Prelude hiding (foldr)
 
 import Data.DeriveTH
@@ -36,7 +37,7 @@ import Data.Term.Var
 
 import qualified Language.Prolog.Syntax as Prolog
 import Language.Prolog.Parser (program)
-import Language.Prolog.Syntax (Program'', Term', ClauseF(..),  GoalF(Pred, (:=:)))
+import Language.Prolog.Syntax (Program'', Term', ClauseF(..),  GoalF(Pred, (:=:)), Clause, Program)
 import Language.Prolog.Utils
 
 -- | Representation Terms
@@ -90,7 +91,7 @@ representPred = f where
 data WildCard = WildCard deriving (Enum, Eq, Ord, Bounded)
 wildCard :: Monad m => m(Either WildCard var)
 wildCard = return (Left WildCard)
-instance Ppr  WildCard where ppr _  = text "_"
+instance Pretty  WildCard where pPrint _  = text "_"
 instance Show WildCard where show _ =  "_"
 
 -- --------
@@ -110,10 +111,12 @@ instance Foldable    (T id) where foldMap   _ _      = mempty
 instance Traversable (T id) where traverse  _ (T id) = pure (T id)
 instance Bifunctor    T     where bimap fid _ (T id) = T (fid id)
 
-instance Ppr id => Ppr  (T id a) where ppr  (T id) = ppr id
-instance Ppr id => PprF (T id)   where pprF (T id) = ppr id
+instance Pretty id => Pretty  (T id a) where pPrint  (T id) = pPrint id
+instance Pretty id => PprF (T id)   where pprF (T id) = pPrint id
 
-instance HasId (T id) id where getId (T id) = Just id
+instance Ord id => HasId (T id) where
+  type TermId (T id) = id
+  getId (T id) = Just id
 
 -- -------
 -- * Term1
@@ -139,11 +142,11 @@ string  = inject . K . String
 psucc   = inject (K Succ)
 zero    = inject (K Zero)
 
-instance Ppr PrologT_ where
-    ppr Tup = text "tuple"
-    ppr Zero = text "0"; ppr Succ = char 's'
-    ppr Cons = text "cons"; ppr Nil = text "nil"
-    ppr (String s) = quotes (text s)
+instance Pretty PrologT_ where
+    pPrint Tup = text "tuple"
+    pPrint Zero = text "0"; pPrint Succ = char 's'
+    pPrint Cons = text "cons"; pPrint Nil = text "nil"
+    pPrint (String s) = quotes (text s)
 
 type PrologP  = K PrologP_
 data PrologP_ = Is | Eq | Cut | Ifte deriving (Eq,Ord,Show)
@@ -154,11 +157,11 @@ eq  = inject (K Eq)
 cut = inject (K Cut)
 ifte= inject (K Ifte)
 
-instance Ppr PrologP_ where
-    ppr Is = text "is"
-    ppr Eq = text "eq"
-    ppr Cut = text "!"
-    ppr Ifte = text "ifte"
+instance Pretty PrologP_ where
+    pPrint Is = text "is"
+    pPrint Eq = text "eq"
+    pPrint Cut = text "!"
+    pPrint Ifte = text "ifte"
 
 
 -- ------------------------------
@@ -235,15 +238,14 @@ instance PprF V           where pprF _ = text "V"
 instance PprF NotVar      where pprF _ = text "notvar"
 instance PprF Static      where pprF _ = text "static"
 instance PprF Compound    where
-    pprF (Compound id []) = ppr id
-    pprF (Compound id dd) = ppr id <> parens (hcat $ punctuate comma $ map ppr dd)
+    pprF (Compound id []) = pPrint id
+    pprF (Compound id dd) = pPrint id <> parens (hcat $ punctuate comma $ map pPrint dd)
 instance PprF FreeArg     where pprF _ = text "free"
 
 -- ** Constructors for abstract compilation
 
 data AbstractCompile a = Denotes a | Domain deriving (Eq, Show, Ord)
 data NotAny a = NotAny deriving (Eq, Show, Ord)
-
 
 domain  :: (AbstractCompile :<: f) => Expr f
 notAny  :: (NotAny :<: f) => Expr f
@@ -270,8 +272,8 @@ instance Functor     (K x) where fmap _ (K x)     = K x
 instance Foldable    (K x) where foldMap _ _      = mempty
 instance Traversable (K x) where traverse _ (K x) = Control.Applicative.pure (K x)
 
-instance Ppr x => Ppr  (K x a) where ppr  (K x) = ppr x
-instance Ppr x => PprF (K x)   where pprF (K x) = ppr x
+instance Pretty x => Pretty  (K x a) where pPrint  (K x) = pPrint x
+instance Pretty x => PprF (K x)   where pprF (K x) = pPrint x
 
 -- ------------------------------
 -- Defaults and built-ins
@@ -297,12 +299,13 @@ addBuiltInPredicates = insertEqual . insertIs
          isEqual (_ :=: _) = True; isEqual _ = False
          isIs Prolog.Is{} = True; isIs _ = False
 
+addMissingPredicates :: Program String -> Program String
 addMissingPredicates cc0
   | Set.null undefined_cc0 = cc0
   | otherwise = (insertDummy . insertPrelude) cc0
 
    where undefined_cc0 = undefinedPreds cc0
-
+         undefinedPreds :: Program String -> Set.Set String
          undefinedPreds    cc = Set.fromList [ f | f <- toList (getDefinedSymbols cc `Set.difference` definedPredicates cc)]
          definedPredicates cc = Set.fromList [ f | Pred f _ :- _ <- cc]
 
@@ -310,6 +313,7 @@ addMissingPredicates cc0
            where cc' = foldr renamePred (cc `mappend` preludePl) (toList repeatedIdentifiers)
                  repeatedIdentifiers = preludePreds `Set.intersection` definedPredicates cc0
          insertDummy cc =  [ Pred f (take (getArity cc f) vars) :- [] | f <- toList (undefinedPreds cc)] ++ cc
+
          renamePred f = fmap2 (rename (findFreeSymbol cc0 f))
            where rename f' (Pred f tt) | f == f' = Pred f' tt
                  rename _ x = x

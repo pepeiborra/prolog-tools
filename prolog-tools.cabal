@@ -14,7 +14,7 @@ extra-source-files:  prelude.pl
 
 Library
   buildable: True
-  build-depends: base, term > 0.1, prolog, containers, mtl, alacarte, control-monad-free >= 0.4, template-haskell, derive, bytestring
+  build-depends: base, term >= 0.1.20090915, prolog, containers, mtl, alacarte, control-monad-free >= 0.4, template-haskell, derive, bytestring
   exposed-modules:
      Language.Prolog.Signature
      Language.Prolog.SharingAnalysis

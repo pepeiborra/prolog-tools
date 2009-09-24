@@ -105,8 +105,8 @@ newtype DeltaMany id da = DeltaMany {deltaMany::Map (id, [da]) [da]} deriving Sh
 
 type ClauseAssignment term d = forall idp var. Ord var => Clause'' idp (Free term var)  -> [Clause'' idp d]
 
-instance (Pretty idp, Pretty term) => Pretty  (Interpretation idp term) where pPrint  = vcat . map pPrint . Set.toList . interpretation
-instance (Pretty idp, Pretty term) => Show (Interpretation idp term) where show = show . pPrint
+instance (Pretty (GoalF idp term)) => Pretty  (Interpretation idp term) where pPrint  = vcat . map pPrint . Set.toList . interpretation
+instance (Pretty (GoalF idp term)) => Show (Interpretation idp term) where show = show . pPrint
 mkI = I . Set.fromList
 liftI f (I i) = I (f i)
 
@@ -277,7 +277,7 @@ instance Pretty (Free f v) => PprBddBddb (Free f v)     where pprBddbddb = pPrin
 instance PprBddBddb a => PprBddBddb (ClauseF  a) where
     pprBddbddb (a :- []) = pprBddbddb a <> text "."
     pprBddbddb (a :- aa) = pprBddbddb a <+> text ":-" <+> hcat (punctuate comma $ map pprBddbddb aa) <> text "."
-instance (Pretty id, Pretty a) => PprBddBddb (GoalF id a) where
+instance (Pretty a, Pretty id, Pretty (GoalF id a)) => PprBddBddb (GoalF id a) where
     pprBddbddb (Pred p args) = pPrint (Pred (pPrint p <> Ppr.int (length args)) args)
     pprBddbddb p = pPrint p
 instance PprBddBddb (ClauseF a) => PprBddBddb [ClauseF a] where pprBddbddb = vcat . map pprBddbddb

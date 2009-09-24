@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts, FlexibleInstances, OverlappingInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TypeOperators #-}
@@ -113,6 +113,8 @@ instance Bifunctor    T     where bimap fid _ (T id) = T (fid id)
 
 instance Pretty id => Pretty  (T id a) where pPrint  (T id) = pPrint id
 instance Pretty id => PprF (T id)   where pprF (T id) = pPrint id
+instance Pretty  (T String a) where pPrint  (T id) = text id
+instance PprF    (T String)   where pprF    (T id) = text id
 
 instance Ord id => HasId (T id) where
   type TermId (T id) = id

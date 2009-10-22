@@ -4,6 +4,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# OPTIONS_GHC -fno-warn-overlapping-patterns #-}
 
 module Language.Prolog.Representation where
@@ -15,6 +16,7 @@ import Data.List (find)
 import Data.Maybe
 import Data.Monoid (Monoid(..), getAny)
 import qualified Data.Monoid as Monoid
+import Data.Typeable
 import Data.Traversable
 import qualified Data.Set as Set
 import Language.Haskell.TH (runIO)
@@ -88,7 +90,7 @@ representPred = f where
 -- * Wildcards for variables
 -- -------------------------
 
-data WildCard = WildCard deriving (Enum, Eq, Ord, Bounded)
+data WildCard = WildCard deriving (Enum, Eq, Ord, Bounded, Typeable)
 wildCard :: Monad m => m(Either WildCard var)
 wildCard = return (Left WildCard)
 instance Pretty  WildCard where pPrint _  = text "_"
@@ -98,7 +100,7 @@ instance Show WildCard where show _ =  "_"
 -- * Term0
 -- --------
 
-data T id a   = T id deriving (Show, Eq, Ord)
+data T id a   = T id deriving (Show, Eq, Ord, Typeable)
 type Term0 id = Free (T id)
 term0 = Impure . T
 
@@ -133,7 +135,7 @@ term1 = Data.Term.Simple.term
 -- -------------------------------
 type PrologT = K PrologT_
 data PrologT_ = Zero | Succ | Tup | Cons | Nil | String String
-                deriving (Show, Eq, Ord)
+                deriving (Show, Eq, Ord, Typeable)
 
 tup, cons, nil, psucc, zero :: (PrologT :<: f) => Expr f
 string :: (PrologT :<: f) => String -> Expr f
@@ -151,7 +153,7 @@ instance Pretty PrologT_ where
     pPrint (String s) = quotes (text s)
 
 type PrologP  = K PrologP_
-data PrologP_ = Is | Eq | Cut | Ifte deriving (Eq,Ord,Show)
+data PrologP_ = Is | Eq | Cut | Ifte deriving (Eq,Ord,Show,Typeable)
 
 is,eq,cut,ifte :: (PrologP :<: f) => Expr f
 is  = inject (K Is)
@@ -175,23 +177,23 @@ instance Pretty PrologP_ where
 -- | Any is the constructor for the distinguished domain object
 --   any, the bottom of the domain. Every object in the concrete
 --   language belongs to the any set.
-data Any f = Any deriving (Eq, Ord, Show)
+data Any f = Any deriving (Eq, Ord, Show,Typeable)
 
 -- | A constructor Static to denote static things
-data Static a = Static deriving (Eq, Ord, Show, Bounded)
+data Static a = Static deriving (Eq, Ord, Show, Bounded,Typeable)
 
 -- | The framework introduces a distinguished object V in the abstract language
 --   to model variables (no term evaluates to V).
-data V a = V deriving (Eq,Ord)
+data V a = V deriving (Eq,Ord,Typeable)
 
 -- | A constructor NotVar to denote nonvar things
-data NotVar f = NotVar deriving (Eq, Ord, Show, Bounded)
+data NotVar f = NotVar deriving (Eq, Ord, Show, Bounded,Typeable)
 
 -- | Compound is a recursive constructor to analyze the
 --   instantiation level of a function symbol
-data Compound f = Compound f [f] deriving (Show, Eq, Ord)
+data Compound f = Compound f [f] deriving (Show, Eq, Ord,Typeable)
 
-data FreeArg a = FreeArg deriving (Eq,Ord,Show)
+data FreeArg a = FreeArg deriving (Eq,Ord,Show,Typeable)
 
 any      :: (Any :<: f) => Expr f
 notvar   :: (NotVar :<: f) => Expr f
@@ -246,8 +248,8 @@ instance PprF FreeArg     where pprF _ = text "free"
 
 -- ** Constructors for abstract compilation
 
-data AbstractCompile a = Denotes a | Domain deriving (Eq, Show, Ord)
-data NotAny a = NotAny deriving (Eq, Show, Ord)
+data AbstractCompile a = Denotes a | Domain deriving (Eq, Show, Ord,Typeable)
+data NotAny a = NotAny deriving (Eq, Show, Ord,Typeable)
 
 domain  :: (AbstractCompile :<: f) => Expr f
 notAny  :: (NotAny :<: f) => Expr f
@@ -269,7 +271,7 @@ instance PprF NotAny where pprF NotAny = text "notAny"
 -- --------
 -- Origami
 -- --------
-newtype  K x a = K x deriving (Eq, Ord, Show)
+newtype  K x a = K x deriving (Eq, Ord, Show,Typeable)
 instance Functor     (K x) where fmap _ (K x)     = K x
 instance Foldable    (K x) where foldMap _ _      = mempty
 instance Traversable (K x) where traverse _ (K x) = Control.Applicative.pure (K x)

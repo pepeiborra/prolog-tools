@@ -4,6 +4,7 @@ import Control.Applicative hiding ((<|>), many)
 import Control.Monad.Error
 import Data.List
 import Data.Maybe
+import Data.Term.Ppr
 import qualified Data.Set as Set
 import Language.Prolog.Parser as Prolog (program, query, clause, whiteSpace)
 import Language.Prolog.Syntax as Prolog

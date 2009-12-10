@@ -10,6 +10,7 @@
 module Language.Prolog.Representation where
 
 import Control.Applicative (pure, Applicative(..), (<$>))
+import Control.Monad
 import Data.Bifunctor
 import Data.Foldable (Foldable(..), toList)
 import Data.List (find)
@@ -111,7 +112,7 @@ isT (match -> Just (T{})) = True; isT _ = False
 instance Functor     (T id) where fmap      f (T id) = T id
 instance Foldable    (T id) where foldMap   _ _      = mempty
 instance Traversable (T id) where traverse  _ (T id) = pure (T id)
-instance Bifunctor    T     where bimap fid _ (T id) = T (fid id)
+instance BifunctorM   T     where bimapM fid _ (T id) = T `liftM` fid id
 
 instance Pretty id => Pretty  (T id a) where pPrint  (T id) = pPrint id
 instance Pretty id => PprF (T id)   where pprF (T id) = pPrint id

@@ -1,20 +1,21 @@
 name: prolog-tools
-version: 0.1.20090924
-Cabal-Version:  >= 1.2
+version: 0.1.20091214
+Cabal-Version:  >= 1.4
 build-type: Simple
 license: AllRightsReserved
 license-file: ""
 copyright: Jose Iborra, All Rights Reserved
+maintainer: pepeiborra@gmail.com
 homepage:
 synopsis: Some Prolog related tools
-description: 
-category:
+description: Some Prolog related tools
+category: Prolog
 author: Jose Iborra
 extra-source-files:  prelude.pl
 
 Library
   buildable: True
-  build-depends: base, term >= 0.1.20090915, prolog, containers, mtl, alacarte, control-monad-free >= 0.4, template-haskell, derive, bytestring
+  build-depends: base > 3 && < 5, term >= 0.1.20090915, prolog, containers, mtl, alacarte, control-monad-free >= 0.4, template-haskell, derive, bytestring
   exposed-modules:
      Language.Prolog.Signature
      Language.Prolog.SharingAnalysis

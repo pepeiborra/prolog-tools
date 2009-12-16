@@ -49,7 +49,7 @@ Library
      cpp-options: -DDERIVE
 
 Executable prolog2prologSolve
-  buildable: True
+  buildable: False
   build-depends: base, prolog, prettyclass, parsec
   main-is: Prolog2PrologSolve.hs
 
@@ -61,7 +61,7 @@ Executable prolog2prologSolve
      cpp-options: -DDERIVE
 
 Executable prologSuccessPatterns
-  buildable: True
+  buildable: False
   build-depends: base, prolog, prettyclass, filepath, process, directory, array
   main-is: PrologSuccessPatterns.hs
 

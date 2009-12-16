@@ -34,6 +34,7 @@ import Control.Monad.RWS (MonadState(..), modify, MonadWriter(..), RWS, evalRWS,
 import Control.Monad.List (ListT(..), runListT)
 import Data.AlaCarte.Ppr
 import Data.Array
+import qualified Data.ByteString.Char8 as BS
 import Data.Foldable (foldMap, toList, Foldable)
 import qualified Data.Foldable as F
 import Data.List (find, (\\), nub, nubBy, sort, sortBy, groupBy, elemIndex, foldl')
@@ -229,17 +230,17 @@ computeSuccessPatterns ComputeSuccessPatternsOpts{..} = do
               results <- forM outpredicates $ \(p,ii) -> liftM concat $ forM (toList ii) $ \i -> do
                            echo ("Processing file " ++ show p ++ show i ++ ".tuples")
                            let fp_result = (takeDirectory fp </> show p ++ show i <.> "tuples")
-                           output <- readFile fp_result
-                           evaluate (length output)
+                           output <- BS.readFile fp_result
+--                           evaluate (length output)
                            when (not debug) $ removeFile fp_result
-                           let tuples = map (map (uncurry wildOrInt) . zip [1..] . words) (drop 1 $ lines output)
+                           let tuples = map (map (uncurry wildOrInt) . zip [1..] . BS.words) (drop 1 $ BS.lines output)
                            return [ Pred p (map (either var' (term0 . (domArray!))) ii)
                                     | ii <- tuples
                                     , all (< domsize) [i | Right i <- ii]]
               return (dom, filter (not.null) results)
 
-    where wildOrInt v "*" = Left v
-          wildOrInt _ i   = Right (read i)
+    where wildOrInt v (BS.unpack -> "*") = Left v
+          wildOrInt _ i | Just (n, _) <- BS.readInt i = Right n
           echo x  | verbosity>0 = hPutStrLn stderr x
                   | otherwise   = return ()
           debugMsg x | debug       = hPutStrLn stderr x

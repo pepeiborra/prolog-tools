@@ -5,6 +5,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-overlapping-patterns #-}
 
 module Language.Prolog.Representation where
@@ -25,10 +27,12 @@ import Text.ParserCombinators.Parsec (parse)
 import Text.PrettyPrint.HughesPJClass as Ppr
 import Prelude hiding (foldr)
 
+#ifdef DERIVE
 import Data.DeriveTH
 import Data.Derive.Functor
 import Data.Derive.Foldable
 import Data.Derive.Traversable
+#endif
 
 import Data.AlaCarte
 import Data.AlaCarte.Ppr
@@ -249,7 +253,9 @@ instance PprF FreeArg     where pprF _ = text "free"
 
 -- ** Constructors for abstract compilation
 
-data AbstractCompile a = Denotes a | Domain deriving (Eq, Show, Ord,Typeable)
+data AbstractCompile a = Denotes a | Domain
+   deriving (Eq, Show, Ord, Typeable)
+
 data NotAny a = NotAny deriving (Eq, Show, Ord,Typeable)
 
 domain  :: (AbstractCompile :<: f) => Expr f
@@ -330,11 +336,15 @@ addMissingPredicates cc0
 -- --------------------
 -- Deriving boilerplate
 -- --------------------
-
+#ifdef DERIVE
 $(derive makeFunctor     ''AbstractCompile)
 $(derive makeFoldable    ''AbstractCompile)
 $(derive makeTraversable ''AbstractCompile)
-
+#else
+deriving instance Functor AbstractCompile
+deriving instance Foldable AbstractCompile
+deriving instance Traversable AbstractCompile
+#endif
 
 instance PprF AbstractCompile where
     pprF (Denotes id) = text "denotes_" <> id

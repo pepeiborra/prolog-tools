@@ -26,10 +26,12 @@ import Data.Traversable (Traversable, sequenceA)
 import Text.PrettyPrint.HughesPJClass as Ppr
 import Prelude hiding (foldr)
 
+#ifdef DERIVE
 import Data.DeriveTH
 import Data.Derive.Functor
 import Data.Derive.Foldable
 import Data.Derive.Traversable
+#endif
 
 import Language.Prolog.Syntax
 import Language.Prolog.Representation
@@ -222,9 +224,15 @@ instance (Enum a, Bounded a, Enum b, Bounded b) => Enum (Either a b) where
 -- Bounded instance for Var
 instance Bounded Var where minBound = VAuto minBound; maxBound = VAuto maxBound
 
+#ifdef DERIVE
 $(derive makeFunctor     ''QueryAnswer)
 $(derive makeFoldable    ''QueryAnswer)
 $(derive makeTraversable ''QueryAnswer)
+#else
+deriving instance Functor QueryAnswer
+deriving instance Foldable QueryAnswer
+deriving instance Traversable QueryAnswer
+#endif
 
 instance PprF QueryAnswer where
     pprF (Answer   id)  = text "answer_" <> id

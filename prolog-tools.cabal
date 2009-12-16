@@ -39,13 +39,35 @@ Library
      Language.Prolog.Transformations
   other-modules:
      Language.Prolog.Utils
+  extensions: CPP
+
+  if impl(ghc > 6.12)
+     Extensions: DeriveFunctor, DeriveFoldable, DeriveTraversable, StandaloneDeriving
+     cpp-options: -DGHC612
+  else
+     build-depends: derive > 2
+     cpp-options: -DDERIVE
 
 Executable prolog2prologSolve
   buildable: True
   build-depends: base, prolog, prettyclass, parsec
   main-is: Prolog2PrologSolve.hs
 
+  if impl(ghc > 6.12)
+     Extensions: DeriveFunctor, DeriveFoldable, DeriveTraversable, StandaloneDeriving
+     cpp-options: -DGHC612
+  else
+     build-depends: derive > 2
+     cpp-options: -DDERIVE
+
 Executable prologSuccessPatterns
   buildable: True
   build-depends: base, prolog, prettyclass, filepath, process, directory, array
   main-is: PrologSuccessPatterns.hs
+
+  if impl(ghc > 6.12)
+     Extensions: DeriveFunctor, DeriveFoldable, DeriveTraversable, StandaloneDeriving
+     cpp-options: -DGHC612
+  else
+     build-depends: derive > 2
+     cpp-options: -DDERIVE

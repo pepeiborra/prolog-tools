@@ -105,7 +105,7 @@ instance Show WildCard where show _ =  "_"
 -- * Term0
 -- --------
 
-data T id a   = T id deriving (Show, Eq, Ord, Typeable)
+newtype T id a   = T id deriving (Show, Eq, Ord, Typeable)
 type Term0 id = Free (T id)
 term0 = Impure . T
 

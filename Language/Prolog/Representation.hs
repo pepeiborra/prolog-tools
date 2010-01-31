@@ -36,7 +36,7 @@ import Data.Derive.Traversable
 
 import Data.AlaCarte
 import Data.AlaCarte.Ppr
-import Data.Term (Term, Free(..), HasId(..), foldTermM)
+import Data.Term (Term, Free(..), HasId(..), Rename(..), foldTermM)
 import Data.Term.Ppr
 import Data.Term.Rules
 import Data.Term.Simple hiding (id)
@@ -100,6 +100,7 @@ wildCard :: Monad m => m(Either WildCard var)
 wildCard = return (Left WildCard)
 instance Pretty  WildCard where pPrint _  = text "_"
 instance Show WildCard where show _ =  "_"
+instance Rename WildCard where rename _ = id
 
 -- --------
 -- * Term0

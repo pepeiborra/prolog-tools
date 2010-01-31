@@ -41,7 +41,7 @@ import Data.Term.Rules
 import Data.Term.Var
 
 -- | Linealize duplicate vars using equality atoms
-flattenDupVarsC :: (Traversable t, Monad t, Ord var, MonadFresh var m) => (var -> Bool) -> Clause'' id (t var) -> m(Clause'' id (t var))
+flattenDupVarsC :: (Traversable t, Monad t, Ord var, MonadVariant var m) => (var -> Bool) -> Clause'' id (t var) -> m(Clause'' id (t var))
 flattenDupVarsC isOk c = do
   (h' :- b', goals) <- runWriterT (T.mapM ((`evalStateT` mempty) . flattenDupVarsGoal) c)
   return (h' :- (b' ++ goals))
@@ -53,7 +53,7 @@ flattenDupVarsC isOk c = do
     case v `Set.member` env of
       False -> modify (Set.insert v) >> return2 v
       True  -> do
-          v' <- lift freshVar
+          v' <- lift $ renaming v
           modify (Set.insert v')
           let res = return v'
           tell [return v :=: res]
@@ -61,7 +61,7 @@ flattenDupVarsC isOk c = do
 
 -- | The standard flattening transformation (see e.g. Bosco & Giovanetti 'Narrowing vs SLD Resolution')
 --   Receives a clause and a scheme to flatten compound terms, and outputs the flattened clause
---flattenC :: (Traversable f, Traversable t, MonadFresh v m) =>
+--flattenC :: (Traversable f, Traversable t, MonadVariant v m) =>
   --            (Free f v -> v -> t (Free f v)) -> ClauseF (t (Free f v)) -> m(ClauseF (t (Free f v)))
 flattenC box clause@(h :- b) = do
     (h' :- b', goals) <- runWriterT (mapM2 flattenTerm clause)

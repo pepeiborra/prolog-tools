@@ -50,7 +50,7 @@ import qualified Data.Traversable as T
 import Data.Traversable (Traversable(..))
 import Text.PrettyPrint.HughesPJClass as Ppr
 
-import Data.Term (HasId(..), MapId(..), MonadFresh(..), directSubterms, mapTermSymbols, foldTerm, foldTermM, matches)
+import Data.Term (HasId(..), MapId(..), MonadVariant(..), Rename(..), directSubterms, mapTermSymbols, foldTerm, foldTermM, matches)
 import Data.Term.Rules
 import Data.Term.Var
 import Language.Prolog.Representation
@@ -109,6 +109,11 @@ instance (Pretty (GoalF idp term)) => Pretty  (Interpretation idp term) where pP
 instance (Pretty (GoalF idp term)) => Show (Interpretation idp term) where show = show . pPrint
 mkI = I . Set.fromList
 liftI f (I i) = I (f i)
+
+instance (Rename v, Rename v') => Rename (Either v v') where
+    rename (Left v) (Left v') = Left (rename v v')
+    rename (Right v) (Right v') = Right (rename v v')
+    rename v v' = v'
 
 -- ------------
 -- Driver
@@ -434,7 +439,7 @@ abstractCompileProgramSmart pl = (dom, notAnyRules, denoteRules, cc') where
 
 
 denoteAndDomainize :: (idp' ~ (AbstractCompile :+: idc :+: idp),
-                       Functor idc, Functor idp, HasId t, TermId t ~ Expr idc, Traversable t, Ord v, Enum v) =>
+                       Functor idc, Functor idp, HasId t, TermId t ~ Expr idc, Traversable t, Ord v, Enum v, Rename v) =>
                       Clause'' (Expr idp) (Free t v) -> Clause'' (Expr idp') (Term0 (Expr idc) v)
 -- Manual resolution of injections, to avoid introducing more constraints
 denoteAndDomainize = fmap2 ids2domain

@@ -79,4 +79,3 @@ merge a b cc
   , Just (Class c2,cc2) <- find b cc1
   = Class (Set.union c1 c2) : cc2
 merge _ _ cc = cc
-

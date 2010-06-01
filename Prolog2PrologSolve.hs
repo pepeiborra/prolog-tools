@@ -23,7 +23,7 @@ main = do
    case translate fp contents of
      Left err -> error err
      Right (pgm, goal) -> putStrLn (show(pPrint pgm) ++
-                                    "\n%query: " ++ show (pPrint goal) ++ "\n")
+                                    "\n%query: " ++ show (pPrint goal) ++ ".\n")
 
 translate :: FilePath -> String -> Either String (Program String, TermF String Mode)
 translate fp txt = do

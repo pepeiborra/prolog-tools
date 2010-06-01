@@ -547,7 +547,5 @@ instance (Ord id, Ord da) => Monoid (DeltaMany id da) where
   DeltaMany m1 `mappend` DeltaMany m2 = DeltaMany $ Map.unionWith (++) m1 m2
 
 
-instance PprF f => Pretty (Expr f) where pPrint = foldExpr pprF
-instance PprF f =>Show (Expr f) where show = show . pPrint
 
 pprTrace msg = trace (render msg)

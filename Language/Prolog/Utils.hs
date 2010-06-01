@@ -1,4 +1,5 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE PatternGuards #-}
 module Language.Prolog.Utils where
 
 import Control.Applicative

@@ -248,8 +248,8 @@ instance PprF V           where pprF _ = text "V"
 instance PprF NotVar      where pprF _ = text "notvar"
 instance PprF Static      where pprF _ = text "static"
 instance PprF Compound    where
-    pprF (Compound id []) = pPrint id
-    pprF (Compound id dd) = pPrint id <> parens (hcat $ punctuate comma $ map pPrint dd)
+    pprF (Compound id []) = id
+    pprF (Compound id dd) = id <> parens (hcat $ punctuate comma dd)
 instance PprF FreeArg     where pprF _ = text "free"
 
 -- ** Constructors for abstract compilation

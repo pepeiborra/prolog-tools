@@ -88,9 +88,11 @@ representPred = f where
     f (Prolog.Pred id tt) = Prolog.Pred (mkT id) tt
     f (Prolog.Is x y)     = Prolog.Pred is [x,y]
     f  Prolog.Cut         = Prolog.Pred cut []
+--    f (Prolog.Not p)      = Prolog.Pred notP [p]
     f (x Prolog.:=: y)    = Prolog.Pred eq [x,y]
-    f (Prolog.Ifte b t e) = Prolog.Pred ifte [b,t,e]
-
+--    f (Prolog.Ifte b t e) = Prolog.Pred ifte [b,t,e]
+--    f (Prolog.Ift  b t)   = Prolog.Pred ifte [b,t]
+    f p = error "representPred: negation and if-then-else not supported"
 -- -------------------------
 -- * Wildcards for variables
 -- -------------------------
@@ -159,20 +161,21 @@ instance Pretty PrologT_ where
     pPrint (String s) = quotes (text s)
 
 type PrologP  = K PrologP_
-data PrologP_ = Is | Eq | Cut | Ifte deriving (Eq,Ord,Show,Typeable)
+data PrologP_ = Is | Eq | Cut | Not | Ifte deriving (Eq,Ord,Show,Typeable)
 
-is,eq,cut,ifte :: (PrologP :<: f) => Expr f
+is,eq,cut,notP,ifte :: (PrologP :<: f) => Expr f
 is  = inject (K Is)
 eq  = inject (K Eq)
 cut = inject (K Cut)
 ifte= inject (K Ifte)
+notP= inject (K Not)
 
 instance Pretty PrologP_ where
     pPrint Is = text "is"
     pPrint Eq = text "eq"
     pPrint Cut = text "!"
     pPrint Ifte = text "ifte"
-
+    pPrint Not = text "/+"
 
 -- ------------------------------
 -- * Various abstract constructors

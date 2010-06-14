@@ -38,7 +38,7 @@ translate fp txt = do
             let sig = getSignature pgm
                 findFreeSymbol :: String -> String
                 findFreeSymbol pre = fromJust $ find (`Set.notMember` allSymbols sig) (pre : [pre ++ show i | i <- [0..]])
-                [solveF, clauseF, goalF, trueF, equalsF] = map findFreeSymbol ["solve", "clause", "goal", "true", "equal"]
+                [solveF, clauseF, goalF, trueF, equalsF, notF, iftF, ifteF] = map findFreeSymbol ["solve", "clause", "goal", "true", "equal", "not", "ift", "ifte"]
                 solveP arg    = Pred solveF [arg]
                 clauseP a1 a2 = Pred clauseF [a1,a2]
                 trueT         = term trueF []
@@ -49,6 +49,9 @@ translate fp txt = do
                 transformPred   (Pred f tt) = term f tt
                 transformPred   (Is f g)    = term equalsF [f, g]
                 transformPred   (f :=: g)   = term equalsF [f, g]
+                transformPred   (Not p)     = term notF  [transformPred p]
+                transformPred   (Ift c t)   = term iftF  [c, transformPred t]
+                transformPred   (Ifte c t e)= term ifteF [c, transformPred t, transformPred e]
                 transformPreds              = foldl1 tupleT . map transformPred . filter (not.isCut)
                 solveClauses = [ solveP trueT :- []
                                , solveP (tupleT x y) :- [solveP x, solveP y]
@@ -89,14 +92,14 @@ modeP = (oneOf "gbi" >> return G) <|> (oneOf "vof" >> return V)
 problemP = do
   txt <- getInput
   let !queryComments = map QueryString $ catMaybes $ map findQuery (lines txt)
-  res <- Prolog.whiteSpace >> many (Clause <$$> Prolog.clause <|> Query <$$> Prolog.query)
-  return (concat res ++ queryComments)
+  res <- liftM catRights Prolog.program
+  return ((Clause <$> res) ++ queryComments)
   where findQuery ('%'    :'q':'u':'e':'r':'y':':':' ':goal) = Just $ goal
         findQuery ('%':' ':'q':'u':'e':'r':'y':':':' ':goal) = Just $ goal
         findQuery ('%'    :'q':'u':'e':'r':'y':':':goal) = Just $ goal
         findQuery ('%':' ':'q':'u':'e':'r':'y':':':goal) = Just $ goal
         findQuery _ = Nothing
-        (<$$>) = fmap . fmap
+        catRights xx = [ x | Right x <- xx]
 
 mapLeft :: (l -> l') -> Either l r -> Either l' r
 mapLeft f (Left x)  = Left(f x)

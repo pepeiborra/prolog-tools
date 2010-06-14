@@ -7,6 +7,7 @@ import Data.Maybe
 import Data.Term.Ppr
 import qualified Data.Set as Set
 import Language.Prolog.Parser as Prolog (program, query, clause, whiteSpace)
+import qualified Language.Prolog.Parser as P
 import Language.Prolog.Syntax as Prolog
 import Language.Prolog.Signature
 import System.Environment
@@ -58,7 +59,7 @@ translate fp txt = do
                 goal'        = Term goalF tt
                 pgm'         = map transformClause pgm ++ solveClauses ++ goalClause
             return (pgm', goal')
-        _ -> fail "Expected one and only one query"
+        _ -> fail $ show fp ++ " - Expected one and only one query"
   where
         goalToGoal (Prolog.Pred f tt) = Term f <$> (parse modesP "" $ unwords $ map (show . pPrint) $ tt)
 
@@ -70,19 +71,20 @@ instance Pretty Mode where pPrint = text . show
 
 --parseGoal :: String -> Either ParseError Goal
 parseGoal = parse p "" where
-    ident = many1 (alphaNum <|> oneOf "!+_-./<>=?\\/^")
-    mode  = (oneOf "gbi" >> return G) <|> (oneOf "vof" >> return V)
-    parens= between (char '(') (char ')')
+--    ident = many1 (alphaNum <|> oneOf "!+_-./<>=?\\/^")
     p = do
-      spaces
-      id <- ident
-      modes <- parens (mode `sepBy` char ',')
+      P.whiteSpace
+      id <- P.identifier
+      modes <- P.parens modesP <|> return []
+      P.dot
       return (Term id modes)
 
-modesP = modeP `sepBy` char ','
+data PrologSection = Query [Goal String] | Clause (Clause String) | QueryString String
+
+
+modesP = P.commaSep modeP
 modeP = (oneOf "gbi" >> return G) <|> (oneOf "vof" >> return V)
 
-data PrologSection = Query [Goal String] | Clause (Clause String) | QueryString String
 
 problemP = do
   txt <- getInput

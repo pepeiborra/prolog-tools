@@ -1,5 +1,5 @@
 name: prolog-tools
-version: 0.1.20100614
+version: 0.1.20111100
 Cabal-Version:  >= 1.4
 build-type: Simple
 license: AllRightsReserved
@@ -16,7 +16,8 @@ extra-source-files:  prelude.pl
 Library
   buildable: True
   build-depends: base > 3 && < 5,
-                 term >= 0.1.20100131,
+                 term >= 0.1.20111100,
+                 bifunctors,
                  prolog,
                  containers,
                  mtl, 

@@ -18,7 +18,7 @@ Library
   build-depends: base > 3 && < 5,
                  term >= 0.1.20111100,
                  bifunctors,
-                 prolog,
+                 prolog >= 0.1.20111100,
                  containers,
                  mtl, 
                  alacarte,

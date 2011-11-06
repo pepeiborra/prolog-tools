@@ -7,6 +7,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# OPTIONS_GHC -fno-warn-overlapping-patterns #-}
 
 module Language.Prolog.Representation where
@@ -39,6 +40,7 @@ import Data.Derive.Traversable
 import Data.AlaCarte
 import Data.AlaCarte.Ppr
 import Data.Term (Term, Free(..), HasId(..), Rename(..), foldTermM)
+import qualified Data.Term as Family
 import Data.Term.Ppr
 import Data.Term.Rules
 import Data.Term.Simple hiding (id)
@@ -121,7 +123,7 @@ isT (match -> Just (T{})) = True; isT _ = False
 instance Functor     (T id) where fmap      f (T id) = T id
 instance Foldable    (T id) where foldMap   _ _      = mempty
 instance Traversable (T id) where traverse  _ (T id) = pure (T id)
-instance Bifunctor     T    where bimap f _   (T id) = T (f id)
+instance Bifunctor     T    where bimap     f _ (T id) = T (f id)
 instance Bifoldable    T    where bifoldMap f _ (T id) = f id
 instance Bitraversable T    where bitraverse fid _ (T id) = T <$> fid id
 
@@ -130,8 +132,9 @@ instance Pretty id => PprF (T id)   where pprF (T id) = pPrint id
 instance Pretty  (T String a) where pPrint  (T id) = text id
 instance PprF    (T String)   where pprF    (T id) = text id
 
+type instance Family.Id1 (T id) = id
+
 instance Ord id => HasId (T id) where
-  type TermId (T id) = id
   getId (T id) = Just id
 
 -- -------

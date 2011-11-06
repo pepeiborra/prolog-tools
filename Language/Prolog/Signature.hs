@@ -15,7 +15,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Term
+import Data.Term as Family
 import Data.Term.Rules
 import Language.Prolog.Syntax
 
@@ -28,7 +28,7 @@ getPrologSignature cc =  PrologSig aritiesF aritiesP where
     aritiesF = Map.fromListWith mappend [ (f, Set.singleton (length tt)) | Pred _ args <- F.toList =<< cc, Impure(Term f tt) <- subterms =<< args ]
 -}
 getPrologSignature :: (Ord idp, HasId termF, Foldable termF) =>
-                      Program'' idp (Free termF var) -> PrologSignature idp (TermId termF)
+                      Program'' idp (Free termF var) -> PrologSignature idp (Family.Id1 termF)
 
 getPrologSignature cc =  PrologSig aritiesF aritiesP where
     aritiesP = Map.fromListWith mappend [ (f, Set.singleton(length tt)) | Pred f tt   <- F.toList =<< cc]

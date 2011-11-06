@@ -7,6 +7,8 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE StandaloneDeriving, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 
 module Language.Prolog.Transformations where
 
@@ -36,12 +38,12 @@ import Data.Derive.Traversable
 import Language.Prolog.Syntax
 import Language.Prolog.Representation
 import Language.Prolog.Utils
-import Data.Term
+import Data.Term hiding (Var)
 import Data.Term.Rules
 import Data.Term.Var
 
 -- | Linealize duplicate vars using equality atoms
-flattenDupVarsC :: (Traversable t, Monad t, Ord var, MonadVariant var m) => (var -> Bool) -> Clause'' id (t var) -> m(Clause'' id (t var))
+flattenDupVarsC :: (Traversable t, Monad t, Ord var, VarM m ~ var, MonadVariant m) => (var -> Bool) -> Clause'' id (t var) -> m(Clause'' id (t var))
 flattenDupVarsC isOk c = do
   (h' :- b', goals) <- runWriterT (T.mapM ((`evalStateT` mempty) . flattenDupVarsGoal) c)
   return (h' :- (b' ++ goals))

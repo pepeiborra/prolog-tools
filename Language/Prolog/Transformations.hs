@@ -15,12 +15,12 @@ module Language.Prolog.Transformations where
 import Control.Applicative
 import Control.Monad.Free
 import Control.Monad.State
-import Control.Monad.Writer
+import Control.Monad.Writer (runWriterT, tell)
 import Data.AlaCarte as Al
 import Data.AlaCarte.Ppr
 import Data.Foldable (Foldable(..), toList)
 import Data.List (nubBy, foldl', groupBy, sort, sortBy, elemIndex, (\\))
-import Data.Monoid
+import Data.Monoid (Monoid(..))
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Traversable as T

@@ -1,5 +1,5 @@
 name: prolog-tools
-version: 0.2.20111111
+version: 0.2.20120204
 Cabal-Version:  >= 1.4
 build-type: Simple
 license: AllRightsReserved

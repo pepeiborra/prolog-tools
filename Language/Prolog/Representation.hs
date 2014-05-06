@@ -6,6 +6,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# OPTIONS_GHC -fno-warn-overlapping-patterns #-}
@@ -39,16 +41,15 @@ import Data.Derive.Traversable
 
 import Data.AlaCarte
 import Data.AlaCarte.Ppr
-import Data.Term (Term, Free(..), HasId(..), Rename(..), foldTermM)
+import Data.Term (Free(..), HasId(..), Rename(..), foldTermM)
 import qualified Data.Term as Family
-import Data.Term.Ppr
 import Data.Term.Rules
 import Data.Term.Simple hiding (id)
 import Data.Term.Var
 
 import qualified Language.Prolog.Syntax as Prolog
 import Language.Prolog.Parser (program)
-import Language.Prolog.Syntax (Program'', Term', ClauseF(..),  GoalF(Pred, (:=:)), Clause, Program)
+import Language.Prolog.Syntax (Program'', Term', ClauseF(..),  GoalF(Pred, (:=:)), Program)
 import Language.Prolog.Utils
 
 -- | Representation Terms
@@ -118,7 +119,8 @@ term0 = Impure . T
 
 mkT :: (T id :<: f) => id -> Expr f
 mkT = inject . T
-isT (match -> Just (T{})) = True; isT _ = False
+isT :: forall id f. (T id :<: f) => Expr f -> Bool
+isT (match -> Just (T{} :: T id (Expr f))) = True; isT _ = False
 
 instance Functor     (T id) where fmap      f (T id) = T id
 instance Foldable    (T id) where foldMap   _ _      = mempty
@@ -132,7 +134,7 @@ instance Pretty id => PprF (T id)   where pprF (T id) = pPrint id
 instance Pretty  (T String a) where pPrint  (T id) = text id
 instance PprF    (T String)   where pprF    (T id) = text id
 
-type instance Family.Id1 (T id) = id
+type instance Family.Id (T id) = id
 
 instance Ord id => HasId (T id) where
   getId (T id) = Just id
@@ -342,7 +344,7 @@ addMissingPredicates cc0
 
          vars = [Prolog.var ("X" ++ show i) | i <- [0..]]
 
-         findFreeSymbol sig pre = fromJust $ find (`Set.notMember` getAllSymbols sig) (pre : [pre ++ show i | i <- [0..]])
+         findFreeSymbol sig pre = fromJust $ find (`Set.notMember` getAllSymbols sig) (pre : [pre ++ show i | i <- [0::Int ..]])
 
 -- --------------------
 -- Deriving boilerplate

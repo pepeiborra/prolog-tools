@@ -39,11 +39,12 @@ import Language.Prolog.Syntax
 import Language.Prolog.Representation
 import Language.Prolog.Utils
 import Data.Term hiding (Var)
+import qualified Data.Term as Family
 import Data.Term.Rules
 import Data.Term.Var
 
 -- | Linealize duplicate vars using equality atoms
-flattenDupVarsC :: (Traversable t, Monad t, Ord var, VarM m ~ var, MonadVariant m) => (var -> Bool) -> Clause'' id (t var) -> m(Clause'' id (t var))
+flattenDupVarsC :: (Traversable t, Monad t, Ord var, Family.Var m ~ var, MonadVariant m) => (var -> Bool) -> Clause'' id (t var) -> m(Clause'' id (t var))
 flattenDupVarsC isOk c = do
   (h' :- b', goals) <- runWriterT (T.mapM ((`evalStateT` mempty) . flattenDupVarsGoal) c)
   return (h' :- (b' ++ goals))
@@ -80,7 +81,7 @@ flattenC box clause@(h :- b) = do
 introduceWildcards :: (Ord var, Foldable f, Functor f, t ~ Free f (Either WildCard var)) =>
                       Clause'' id t -> Clause'' id t
 introduceWildcards c = fmap2 (>>=f) c where
-    occurrences = Map.fromListWith (+) (foldMap2 vars c `zip` repeat 1)
+    occurrences = Map.fromListWith (+) (foldMap2 vars c `zip` repeat (1::Int))
     f v@Right{} | Just 1 <- Map.lookup v occurrences = wildCard
     f v = return v
 

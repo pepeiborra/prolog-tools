@@ -1,9 +1,9 @@
-name: prolog-tools
-version: 0.2.20120204
+name: narradar-prolog-tools
+version: 0.3
 Cabal-Version:  >= 1.4
 build-type: Simple
 license: AllRightsReserved
-license-file: ""
+license-file: LICENSE
 copyright: Jose Iborra, All Rights Reserved
 maintainer: pepeiborra@gmail.com
 homepage:
@@ -16,12 +16,12 @@ extra-source-files:  prelude.pl
 Library
   buildable: True
   build-depends: base > 3 && < 5,
-                 term >= 0.2,
+                 narradar-term >= 0.3,
                  bifunctors,
-                 prolog >= 0.2,
+                 narradar-prolog >= 0.3,
                  containers,
                  mtl, 
-                 alacarte,
+                 narradar-alacarte,
                  control-monad-free >= 0.4,
                  template-haskell,
                  bytestring,
@@ -51,7 +51,7 @@ Library
 
 Executable prolog2prologSolve
   buildable: False
-  build-depends: base, prolog, prettyclass, parsec
+  build-depends: base, narradar-prolog, prettyclass, parsec
   main-is: Prolog2PrologSolve.hs
 
   if impl(ghc > 6.12)
@@ -63,7 +63,7 @@ Executable prolog2prologSolve
 
 Executable prologSuccessPatterns
   buildable: False
-  build-depends: base, prolog, prettyclass, filepath, process, directory, array
+  build-depends: base, narradar-prolog, prettyclass, filepath, process, directory, array
   main-is: PrologSuccessPatterns.hs
 
   if impl(ghc > 6.12)

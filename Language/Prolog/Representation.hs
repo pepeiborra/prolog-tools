@@ -5,17 +5,19 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE StandaloneDeriving, GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable, DeriveGeneric #-}
 {-# OPTIONS_GHC -fno-warn-overlapping-patterns #-}
 
 module Language.Prolog.Representation where
 
 import Control.Applicative (pure, Applicative(..), (<$>))
+import Control.DeepSeq
 import Control.Monad
+import Control.Monad.Free
 import Data.Bifunctor
 import Data.Bifoldable
 import Data.Bitraversable
@@ -31,17 +33,11 @@ import Language.Haskell.TH (runIO)
 import Text.ParserCombinators.Parsec (parse)
 import Text.PrettyPrint.HughesPJClass as Ppr
 import Prelude hiding (foldr)
-
-#ifdef DERIVE
-import Data.DeriveTH
-import Data.Derive.Functor
-import Data.Derive.Foldable
-import Data.Derive.Traversable
-#endif
+import GHC.Generics (Generic)
 
 import Data.AlaCarte
 import Data.AlaCarte.Ppr
-import Data.Term (Free(..), HasId(..), Rename(..), foldTermM)
+import Data.Term (HasId(..), HasId1(..), Rename(..), foldTermM)
 import qualified Data.Term as Family
 import Data.Term.Rules
 import Data.Term.Simple hiding (id)
@@ -102,18 +98,19 @@ representPred = f where
 -- * Wildcards for variables
 -- -------------------------
 
-data WildCard = WildCard deriving (Enum, Eq, Ord, Bounded, Typeable)
+data WildCard = WildCard deriving (Enum, Eq, Ord, Bounded, Typeable,Generic)
 wildCard :: Monad m => m(Either WildCard var)
 wildCard = return (Left WildCard)
 instance Pretty  WildCard where pPrint _  = text "_"
 instance Show WildCard where show _ =  "_"
 instance Rename WildCard where rename _ = id
+instance NFData WildCard
 
 -- --------
 -- * Term0
 -- --------
 
-newtype T id a   = T id deriving (Show, Eq, Ord, Typeable)
+newtype T id a   = T id deriving (Show, Eq, Ord, Typeable,Generic)
 type Term0 id = Free (T id)
 term0 = Impure . T
 
@@ -134,10 +131,12 @@ instance Pretty id => PprF (T id)   where pprF (T id) = pPrint id
 instance Pretty  (T String a) where pPrint  (T id) = text id
 instance PprF    (T String)   where pprF    (T id) = text id
 
+instance NFData id => NFData (T id a) where rnf (T id) = rnf id
+
 type instance Family.Id (T id) = id
 
-instance Ord id => HasId (T id) where
-  getId (T id) = Just id
+instance Ord id => HasId1 (T id) where
+  getId1 (T id) = Just id
 
 -- -------
 -- * Term1
@@ -152,7 +151,11 @@ term1 = Data.Term.Simple.term
 -- -------------------------------
 type PrologT = K PrologT_
 data PrologT_ = Zero | Succ | Tup | Cons | Nil | String String
-                deriving (Show, Eq, Ord, Typeable)
+                deriving (Show, Eq, Ord, Typeable, Generic)
+
+instance NFData PrologT_ where
+  rnf (String s) = rnf s
+  rnf x = ()
 
 tup, cons, nil, psucc, zero :: (PrologT :<: f) => Expr f
 string :: (PrologT :<: f) => String -> Expr f
@@ -170,7 +173,9 @@ instance Pretty PrologT_ where
     pPrint (String s) = quotes (text s)
 
 type PrologP  = K PrologP_
-data PrologP_ = Is | Eq | Cut | Not | Ifte deriving (Eq,Ord,Show,Typeable)
+data PrologP_ = Is | Eq | Cut | Not | Ifte deriving (Eq,Ord,Show,Typeable,Generic)
+
+instance NFData PrologP_
 
 is,eq,cut,notP,ifte :: (PrologP :<: f) => Expr f
 is  = inject (K Is)
@@ -195,23 +200,23 @@ instance Pretty PrologP_ where
 -- | Any is the constructor for the distinguished domain object
 --   any, the bottom of the domain. Every object in the concrete
 --   language belongs to the any set.
-data Any f = Any deriving (Eq, Ord, Show,Typeable)
+data Any f = Any deriving (Eq, Ord, Show,Typeable,Generic)
 
 -- | A constructor Static to denote static things
-data Static a = Static deriving (Eq, Ord, Show, Bounded,Typeable)
+data Static a = Static deriving (Eq, Ord, Show, Bounded,Typeable,Generic)
 
 -- | The framework introduces a distinguished object V in the abstract language
 --   to model variables (no term evaluates to V).
-data V a = V deriving (Eq,Ord,Typeable)
+data V a = V deriving (Eq,Ord,Typeable,Generic)
 
 -- | A constructor NotVar to denote nonvar things
-data NotVar f = NotVar deriving (Eq, Ord, Show, Bounded,Typeable)
+data NotVar f = NotVar deriving (Eq, Ord, Show, Bounded,Typeable,Generic)
 
 -- | Compound is a recursive constructor to analyze the
 --   instantiation level of a function symbol
-data Compound f = Compound f [f] deriving (Show, Eq, Ord,Typeable)
+data Compound f = Compound f [f] deriving (Show, Eq, Ord,Typeable,Generic)
 
-data FreeArg a = FreeArg deriving (Eq,Ord,Show,Typeable)
+data FreeArg a = FreeArg deriving (Eq,Ord,Show,Typeable,Generic)
 
 any      :: (Any :<: f) => Expr f
 notvar   :: (NotVar :<: f) => Expr f
@@ -264,12 +269,19 @@ instance PprF Compound    where
     pprF (Compound id dd) = id <> parens (hcat $ punctuate comma dd)
 instance PprF FreeArg     where pprF _ = text "free"
 
+instance NFData (Any a)
+instance NFData (NotVar a)
+instance NFData (Static a)
+instance NFData a => NFData (Compound a) where rnf (Compound id tt) = rnf id `seq` rnf tt
+instance NFData (V a)
+instance NFData (FreeArg a)
+
 -- ** Constructors for abstract compilation
 
 data AbstractCompile a = Denotes a | Domain
-   deriving (Eq, Show, Ord, Typeable)
+   deriving (Eq, Show, Ord, Typeable,Generic)
 
-data NotAny a = NotAny deriving (Eq, Show, Ord,Typeable)
+data NotAny a = NotAny deriving (Eq, Show, Ord,Typeable,Generic)
 
 domain  :: (AbstractCompile :<: f) => Expr f
 notAny  :: (NotAny :<: f) => Expr f
@@ -291,7 +303,7 @@ instance PprF NotAny where pprF NotAny = text "notAny"
 -- --------
 -- Origami
 -- --------
-newtype  K x a = K x deriving (Eq, Ord, Show,Typeable)
+newtype  K x a = K x deriving (Eq, Ord, Show,Typeable,Generic, NFData)
 instance Functor     (K x) where fmap _ (K x)     = K x
 instance Foldable    (K x) where foldMap _ _      = mempty
 instance Traversable (K x) where traverse _ (K x) = Control.Applicative.pure (K x)

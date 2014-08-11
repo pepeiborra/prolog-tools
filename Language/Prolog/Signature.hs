@@ -3,6 +3,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Language.Prolog.Signature (PrologSignature(..), getPrologSignature) where
 
@@ -25,12 +26,12 @@ getPrologSignature cc =  PrologSig aritiesF aritiesP where
     aritiesP = Map.fromListWith mappend [ (f, Set.singleton (length tt)) | Pred f tt   <- F.toList =<< cc]
     aritiesF = Map.fromListWith mappend [ (f, Set.singleton (length tt)) | Pred _ args <- F.toList =<< cc, Impure(Term f tt) <- subterms =<< args ]
 -}
-getPrologSignature :: (Ord idp, HasId termF, Foldable termF) =>
+getPrologSignature :: (Ord idp, Ord(Family.Id termF), HasId1 termF, Foldable termF) =>
                       Program'' idp (Free termF var) -> PrologSignature idp (Family.Id termF)
 
 getPrologSignature cc =  PrologSig aritiesF aritiesP where
     aritiesP = Map.fromListWith mappend [ (f, Set.singleton(length tt)) | Pred f tt   <- F.toList =<< cc]
-    aritiesF = Map.fromListWith mappend [ (f, Set.singleton(length $ toList t)) | Pred _ args <- F.toList =<< cc, Impure t <- subterms =<< args, Just f <- [getId t]]
+    aritiesF = Map.fromListWith mappend [ (f, Set.singleton(length $ toList t)) | Pred _ args <- F.toList =<< cc, Impure t <- subterms =<< args, Just f <- [getId1 t]]
 
 {-
 instance (HasId termF id, Foldable termF, Ord id) => HasSignature [ClauseF (GoalF id (Free termF v))] id

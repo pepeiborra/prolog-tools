@@ -30,7 +30,8 @@ Library
                  process,
                  directory,
                  filepath,
-                 array
+                 array,
+                 deepseq
   exposed-modules:
      Language.Prolog.Signature
      Language.Prolog.SharingAnalysis

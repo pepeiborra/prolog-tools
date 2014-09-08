@@ -33,7 +33,7 @@ import Language.Haskell.TH (runIO)
 import Text.ParserCombinators.Parsec (parse)
 import Text.PrettyPrint.HughesPJClass as Ppr
 import Prelude hiding (foldr)
-import GHC.Generics (Generic)
+import GHC.Generics (Generic,Generic1)
 
 import Data.AlaCarte
 import Data.AlaCarte.Ppr
@@ -110,7 +110,7 @@ instance NFData WildCard
 -- * Term0
 -- --------
 
-newtype T id a   = T id deriving (Show, Eq, Ord, Typeable,Generic)
+newtype T id a   = T id deriving (Show, Eq, Ord, Typeable,Generic,Generic1)
 type Term0 id = Free (T id)
 term0 = Impure . T
 
@@ -200,23 +200,23 @@ instance Pretty PrologP_ where
 -- | Any is the constructor for the distinguished domain object
 --   any, the bottom of the domain. Every object in the concrete
 --   language belongs to the any set.
-data Any f = Any deriving (Eq, Ord, Show,Typeable,Generic)
+data Any f = Any deriving (Eq, Ord, Show,Typeable,Generic,Generic1)
 
 -- | A constructor Static to denote static things
-data Static a = Static deriving (Eq, Ord, Show, Bounded,Typeable,Generic)
+data Static a = Static deriving (Eq, Ord, Show, Bounded,Typeable,Generic,Generic1)
 
 -- | The framework introduces a distinguished object V in the abstract language
 --   to model variables (no term evaluates to V).
-data V a = V deriving (Eq,Ord,Typeable,Generic)
+data V a = V deriving (Eq,Ord,Typeable,Generic,Generic1)
 
 -- | A constructor NotVar to denote nonvar things
-data NotVar f = NotVar deriving (Eq, Ord, Show, Bounded,Typeable,Generic)
+data NotVar f = NotVar deriving (Eq, Ord, Show, Bounded,Typeable,Generic,Generic1)
 
 -- | Compound is a recursive constructor to analyze the
 --   instantiation level of a function symbol
-data Compound f = Compound f [f] deriving (Show, Eq, Ord,Typeable,Generic)
+data Compound f = Compound f [f] deriving (Show, Eq, Ord,Typeable,Generic,Generic1)
 
-data FreeArg a = FreeArg deriving (Eq,Ord,Show,Typeable,Generic)
+data FreeArg a = FreeArg deriving (Eq,Ord,Show,Typeable,Generic,Generic1)
 
 any      :: (Any :<: f) => Expr f
 notvar   :: (NotVar :<: f) => Expr f
@@ -303,7 +303,7 @@ instance PprF NotAny where pprF NotAny = text "notAny"
 -- --------
 -- Origami
 -- --------
-newtype  K x a = K x deriving (Eq, Ord, Show,Typeable,Generic, NFData)
+newtype  K x a = K x deriving (Eq, Ord, Show,Typeable,Generic, Generic1, NFData)
 instance Functor     (K x) where fmap _ (K x)     = K x
 instance Foldable    (K x) where foldMap _ _      = mempty
 instance Traversable (K x) where traverse _ (K x) = Control.Applicative.pure (K x)

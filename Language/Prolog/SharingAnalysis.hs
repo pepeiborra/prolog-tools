@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternGuards, ViewPatterns #-}
 {-# LANGUAGE TypeSynonymInstances #-}

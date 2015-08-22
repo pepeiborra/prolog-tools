@@ -25,7 +25,7 @@ Library
                  control-monad-free >= 0.4,
                  template-haskell,
                  bytestring,
-                 prettyclass,
+                 pretty,
                  parsec,
                  process,
                  directory,
@@ -52,7 +52,7 @@ Library
 
 Executable prolog2prologSolve
   buildable: False
-  build-depends: base, narradar-prolog, prettyclass, parsec
+  build-depends: base, narradar-prolog, pretty, parsec
   main-is: Prolog2PrologSolve.hs
 
   if impl(ghc > 6.12)
@@ -64,7 +64,7 @@ Executable prolog2prologSolve
 
 Executable prologSuccessPatterns
   buildable: False
-  build-depends: base, narradar-prolog, prettyclass, filepath, process, directory, array
+  build-depends: base, narradar-prolog, pretty, filepath, process, directory, array
   main-is: PrologSuccessPatterns.hs
 
   if impl(ghc > 6.12)
